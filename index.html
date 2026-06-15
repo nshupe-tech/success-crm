@@ -1288,7 +1288,7 @@ function AppointmentModal({ title, students, onSelect, onClose }) {
 }
 
 // ─── DASHBOARD ───────────────────────────────────────────────────────────────
-function DashboardPage({ onSelect }) {
+function DashboardPage({ onSelect, user }) {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [apptModal, setApptModal] = useState(null); // {title, students}
@@ -1327,6 +1327,23 @@ function DashboardPage({ onSelect }) {
   const sts = leads.filter(l=>l.lead_status==='Sent to Student Services').length;
   const noShows = leads.filter(l=>l.enrollment_appointment_result==='No Show')
     .sort((a,b)=>new Date(b.enrollment_appointment_time||0)-new Date(a.enrollment_appointment_time||0));
+
+  // Stale leads: no activity in 7+ days, assigned to current user, not in a terminal/active state
+  const DONE_STATUSES = new Set(['Enrolled','Student Not Qualified','Not Qualified']);
+  const myName = user?.displayName || user?.email || '';
+  const staleLeads = leads.filter(l => {
+    if (DONE_STATUSES.has(l.lead_status)) return false;
+    if (l.lead_status === 'Enrolled' || l.enrollment_appointment_result === 'Enrollment Appointment Scheduled') return false;
+    const assigned = (l.assigned_to||'').trim().toLowerCase();
+    if (assigned && assigned !== myName.toLowerCase()) return false;
+    const lastAct = l.last_activity_at?.toDate?.() || l.updated_at?.toDate?.() || l.created_at?.toDate?.() || null;
+    if (!lastAct) return false;
+    return lastAct < new Date(now - 7*864e5);
+  }).sort((a,b) => {
+    const aT = (a.last_activity_at||a.updated_at||a.created_at)?.toDate?.() || 0;
+    const bT = (b.last_activity_at||b.updated_at||b.created_at)?.toDate?.() || 0;
+    return aT - bT; // oldest first
+  });
 
   if (loading) return <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Loading...</div>;
 
@@ -1383,6 +1400,53 @@ function DashboardPage({ onSelect }) {
             count={apptMonth.length} students={apptMonth} accent="#5ba300" />
         </div>
       </div>
+
+      {/* My Follow-Up Tasks */}
+      {staleLeads.length > 0 && (
+        <div className="mb-6">
+          <div className="flex items-center gap-3 mb-3">
+            <h2 className="font-bold text-gray-600 text-xs uppercase tracking-wider">My Follow-Up Tasks</h2>
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full text-white" style={{background:'#ff7a2a'}}>{staleLeads.length}</span>
+          </div>
+          <div className="bg-white rounded-2xl border-2 shadow-sm overflow-hidden" style={{borderColor:'#ff7a2a22'}}>
+            <div className="px-5 py-3 flex items-center gap-2 border-b border-orange-50" style={{background:'#fff7f2'}}>
+              <span className="text-orange-400 text-lg">⚠️</span>
+              <p className="text-sm text-orange-700 font-medium">
+                {staleLeads.length} lead{staleLeads.length!==1?'s':''} assigned to you {staleLeads.length===1?'hasn\'t':'haven\'t'} had any activity in over 7 days.
+              </p>
+            </div>
+            <div className="divide-y divide-gray-50">
+              {staleLeads.map(l => {
+                const lastAct = (l.last_activity_at||l.updated_at||l.created_at)?.toDate?.();
+                const daysAgo = lastAct ? Math.floor((now - lastAct) / 864e5) : null;
+                return (
+                  <div key={l.id} onClick={()=>onSelect(l.id)}
+                    className="flex items-center gap-4 px-5 py-3.5 cursor-pointer hover:bg-gray-50 transition">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 text-white"
+                      style={{background:'#3b4f5f'}}>
+                      {(l.student_first_name||'?')[0]}{(l.student_last_name||'')[0]}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-gray-800">{l.student_first_name} {l.student_last_name}</div>
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        {l.student_phone||l.contact_phone||''}{l.learning_center ? ` · ${l.learning_center}` : ''}
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <StatusBadge status={l.lead_status} />
+                      {daysAgo !== null && (
+                        <div className="text-xs font-semibold mt-1" style={{color:'#ff7a2a'}}>
+                          {daysAgo} day{daysAgo!==1?'s':''} since last activity
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Recent inquiries */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
@@ -1525,7 +1589,10 @@ function ActivityFeed({ studentId, user }) {
         created_by: user.displayName||user.email,
         created_at: firebase.firestore.FieldValue.serverTimestamp(),
       });
-      await db.collection('students').doc(studentId).update({ updated_at: firebase.firestore.FieldValue.serverTimestamp() });
+      await db.collection('students').doc(studentId).update({
+        updated_at: firebase.firestore.FieldValue.serverTimestamp(),
+        last_activity_at: firebase.firestore.FieldValue.serverTimestamp(),
+      });
       setContent(''); setShowForm(false);
     } finally { setSaving(false); }
   }
@@ -1692,7 +1759,11 @@ function DetailsForm({ student, studentId, user, adminCenters=[] }) {
       }
 
       const updatedForm = {...form, student_age: form.student_dob ? calcAge(form.student_dob) : (form.student_age||'')};
-      await db.collection('students').doc(studentId).update({...updatedForm, updated_at: firebase.firestore.FieldValue.serverTimestamp()});
+      await db.collection('students').doc(studentId).update({
+        ...updatedForm,
+        updated_at: firebase.firestore.FieldValue.serverTimestamp(),
+        last_activity_at: firebase.firestore.FieldValue.serverTimestamp(),
+      });
 
       const actRef = db.collection('students').doc(studentId).collection('activities');
       const who = user.displayName||user.email;
@@ -2142,7 +2213,8 @@ function NewLeadModal({ user, onClose, onCreated }) {
     if(!form.student_first_name&&!form.guardian_first_name) return;
     setSaving(true);
     try {
-      const ref = await db.collection('students').add({...form, created_at:firebase.firestore.FieldValue.serverTimestamp(), updated_at:firebase.firestore.FieldValue.serverTimestamp()});
+      const ts = firebase.firestore.FieldValue.serverTimestamp();
+      const ref = await db.collection('students').add({...form, created_at:ts, updated_at:ts, last_activity_at:ts});
       await db.collection('students').doc(ref.id).collection('activities').add({
         type:'note', content:`Inquiry created. Status: ${form.lead_status}.`,
         created_by:user.displayName||user.email, created_at:firebase.firestore.FieldValue.serverTimestamp(),
@@ -2297,7 +2369,7 @@ function MainApp({ user }) {
       <Navbar user={user} page={page} setPage={handleSetPage} isAdmin={isAdmin} />
       {showNew && <NewLeadModal user={user} onClose={()=>setShowNew(false)} onCreated={id=>{setShowNew(false);openStudent(id);}} />}
       <div className="flex-1">
-        {page==='dashboard' && <DashboardPage onSelect={openStudent} />}
+        {page==='dashboard' && <DashboardPage onSelect={openStudent} user={user} />}
         {page==='list' && <LeadsListPage user={user} onSelect={openStudent} onAddNew={()=>setShowNew(true)} />}
         {page==='student' && studentId && <StudentProfile studentId={studentId} user={user} onBack={goList} />}
         {page==='admin' && <AdminPage user={user} />}
