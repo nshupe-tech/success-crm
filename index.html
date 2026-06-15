@@ -33,10 +33,12 @@
     .fade-in { animation: fadeIn 0.18s ease-in; }
     @keyframes fadeIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
     .status-badge { display:inline-flex; align-items:center; padding:3px 12px; border-radius:9999px; font-size:12px; font-weight:600; letter-spacing:.01em; }
-    .note-card  { border-left: 4px solid #5ba300; background: #f6fdf0; }
-    .call-card  { border-left: 4px solid #3b4f5f; background: #f0f4f7; }
-    .text-card  { border-left: 4px solid #7c3aed; background: #f7f3ff; }
-    .email-card { border-left: 4px solid #ff7a2a; background: #fff7f2; }
+    .note-card        { border-left: 4px solid #5ba300; background: #f6fdf0; }
+    .call-card        { border-left: 4px solid #3b4f5f; background: #f0f4f7; }
+    .text-card        { border-left: 4px solid #7c3aed; background: #f7f3ff; }
+    .email-card       { border-left: 4px solid #ff7a2a; background: #fff7f2; }
+    .appointment-card { border-left: 4px solid #2563eb; background: #eff6ff; }
+    .update-card      { border-left: 4px solid #94a3b8; background: #f8fafc; }
     ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background:#f1f1f1; } ::-webkit-scrollbar-thumb { background:#ccc; border-radius:3px; }
   </style>
 </head>
@@ -72,14 +74,16 @@ const stageFromStatus = (s) => {
   if (s === 'Sent to Student Services') return 'enrolled';
   return 'open';
 };
-const APPOINTMENT_RESULTS = ['Student Not Qualified','Enrolled','Needs Follow Up','No Show','Rescheduled','Cancelled'];
+const APPOINTMENT_RESULTS = ['Enrollment Appointment Scheduled','Enrolled','Needs Follow Up','No Show','Rescheduled','Cancelled','Student Not Qualified'];
 const LEAD_SOURCES = ['Website','Referral','School District','Social Media','Community Event','Phone Inquiry','Email','Walk-In','Other'];
 const DOC_TYPES = ['State ID / Photo ID','Birth Certificate','Transcript','IEP / 504 Plan','Enrollment Agreement','Proof of Residency','Other'];
 const ACTIVITY_TYPES = [
-  { key:'note',  label:'Note',  icon:'📝', cardClass:'note-card',  iconBg:'bg-green-50',  iconColor:'text-green-700' },
-  { key:'call',  label:'Call',  icon:'📞', cardClass:'call-card',  iconBg:'bg-navy-50',   iconColor:'text-navy-700' },
-  { key:'text',  label:'Text',  icon:'💬', cardClass:'text-card',  iconBg:'bg-purple-50', iconColor:'text-purple-700' },
-  { key:'email', label:'Email', icon:'📧', cardClass:'email-card', iconBg:'bg-orange-50', iconColor:'text-orange-700' },
+  { key:'note',        label:'Note',               icon:'📝', cardClass:'note-card',        iconBg:'bg-green-50',  loggable:true },
+  { key:'call',        label:'Call',               icon:'📞', cardClass:'call-card',        iconBg:'bg-slate-50',  loggable:true },
+  { key:'text',        label:'Text',               icon:'💬', cardClass:'text-card',        iconBg:'bg-purple-50', loggable:true },
+  { key:'email',       label:'Email',              icon:'📧', cardClass:'email-card',       iconBg:'bg-orange-50', loggable:true },
+  { key:'appointment', label:'Appointment Change', icon:'📅', cardClass:'appointment-card', iconBg:'bg-blue-50',   loggable:false },
+  { key:'update',      label:'Details Updated',    icon:'✏️', cardClass:'update-card',      iconBg:'bg-gray-50',   loggable:false },
 ];
 const STATUS_COLORS = {
   'New Inquiry':'bg-blue-100 text-blue-700',
@@ -995,12 +999,16 @@ function ActivityFeed({ studentId, user }) {
   const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [filterType, setFilterType] = useState('');
+  const [search, setSearch] = useState('');
+
   useEffect(()=>{
     return db.collection('students').doc(studentId).collection('activities')
       .orderBy('created_at','desc').onSnapshot(snap=>{
         setActivities(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoading(false);
       });
   },[studentId]);
+
   async function add() {
     if(!content.trim()) return;
     setSaving(true);
@@ -1016,33 +1024,39 @@ function ActivityFeed({ studentId, user }) {
   }
 
   const typeInfo = (t) => ACTIVITY_TYPES.find(x=>x.key===t) || ACTIVITY_TYPES[0];
+  const loggableTypes = ACTIVITY_TYPES.filter(t=>t.loggable);
+
+  const filtered = activities.filter(a=>{
+    if(filterType && a.type !== filterType) return false;
+    if(search && !a.content?.toLowerCase().includes(search.toLowerCase()) && !a.created_by?.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
 
   return (
     <div>
-      {/* Log buttons */}
+      {/* Single Log button / form */}
       {!showForm ? (
-        <div className="flex flex-wrap gap-2 mb-5">
-          {ACTIVITY_TYPES.map(t=>(
-            <button key={t.key} onClick={()=>{setActType(t.key);setShowForm(true);}}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium border transition hover:shadow-sm ${t.cardClass.replace('-card','')} border-gray-200 bg-white hover:bg-gray-50`}>
-              <span>{t.icon}</span> Log {t.label}
-            </button>
-          ))}
+        <div className="mb-5">
+          <button onClick={()=>setShowForm(true)}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition shadow-sm"
+            style={{background:'#5ba300'}}>
+            ＋ Log Activity
+          </button>
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-5">
           <div className="flex gap-2 mb-3 flex-wrap">
-            {ACTIVITY_TYPES.map(t=>(
+            {loggableTypes.map(t=>(
               <button key={t.key} onClick={()=>setActType(t.key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition ${actType===t.key ? 'text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                style={actType===t.key?{background:'#5ba300'}:{}}>
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition ${actType===t.key ? 'text-white shadow-sm' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                style={actType===t.key?{background:'#3b4f5f'}:{}}>
                 {t.icon} {t.label}
               </button>
             ))}
           </div>
           <textarea
             className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 min-h-[90px] resize-none"
-            placeholder={`Write your ${actType} notes here...`}
+            placeholder={`Write your ${actType} details here…`}
             value={content} onChange={e=>setContent(e.target.value)} autoFocus />
           <div className="flex items-center gap-2 mt-3">
             <button onClick={add} disabled={saving||!content.trim()}
@@ -1055,29 +1069,41 @@ function ActivityFeed({ studentId, user }) {
         </div>
       )}
 
+      {/* Search + filter bar */}
+      <div className="flex gap-2 mb-4">
+        <input type="text" value={search} onChange={e=>setSearch(e.target.value)}
+          placeholder="Search activity…"
+          className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+        <select value={filterType} onChange={e=>setFilterType(e.target.value)}
+          className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-white">
+          <option value="">All Types</option>
+          {ACTIVITY_TYPES.map(t=><option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
+      </div>
+
       {/* Feed */}
       {loading ? <div className="text-center py-10 text-gray-400 text-sm">Loading activity…</div> :
-        activities.length===0 ? (
+        filtered.length===0 ? (
           <div className="text-center py-14 text-gray-300">
             <div className="text-4xl mb-2">📋</div>
-            <div className="text-sm font-medium">No activity yet</div>
-            <div className="text-xs mt-1">Log a call, note, or text above to get started</div>
+            <div className="text-sm font-medium">{activities.length===0 ? 'No activity yet' : 'No results match your filter'}</div>
+            {activities.length===0 && <div className="text-xs mt-1">Log a call, note, or text above to get started</div>}
           </div>
         ) : (
           <div className="space-y-3">
-            {activities.map(a=>{
+            {filtered.map(a=>{
               const t=typeInfo(a.type);
               return (
-                <div key={a.id} className={`bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex gap-3 ${t.cardClass}`}>
+                <div key={a.id} className={`rounded-2xl shadow-sm border border-gray-100 p-4 flex gap-3 ${t.cardClass}`}>
                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-base ${t.iconBg}`}>
                     {t.icon}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1.5">
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                       <span className="text-xs font-bold uppercase tracking-wider text-gray-500">{t.label}</span>
-                      <span className="text-gray-200">·</span>
+                      <span className="text-gray-300">·</span>
                       <span className="text-xs text-gray-500 font-medium">{a.created_by}</span>
-                      <span className="text-gray-200">·</span>
+                      <span className="text-gray-300">·</span>
                       <span className="text-xs text-gray-400" title={fmtDateTime(a.created_at)}>{timeAgo(a.created_at)}</span>
                     </div>
                     <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{a.content}</div>
@@ -1135,11 +1161,38 @@ function DetailsForm({ student, studentId, user, adminCenters=[] }) {
   async function save() {
     setSaving(true);
     try {
-      await db.collection('students').doc(studentId).update({
-        ...form,
-        student_age: form.student_dob ? calcAge(form.student_dob) : (form.student_age||''),
-        updated_at: firebase.firestore.FieldValue.serverTimestamp(),
-      });
+      const TRACKED = {
+        student_first_name:'Student First Name', student_last_name:'Student Last Name',
+        student_dob:'Date of Birth', student_phone:'Student Phone', student_email:'Student Email',
+        learning_center:'Learning Center', last_school_attended:'Last School Attended',
+        iep_504:'IEP/504 Status', expelled:'Expelled Status', preferred_language:'Preferred Language',
+        guardian_first_name:'Guardian First Name', guardian_last_name:'Guardian Last Name',
+        guardian_phone:'Guardian Phone', guardian_email:'Guardian Email',
+        enrollment_appointment_time:'Enrollment Appointment Time',
+        enrollment_appointment_result:'Enrollment Appointment Result',
+        center_phone:'Center Phone', center_address:'Center Address',
+      };
+      const APPT_KEYS = new Set(['enrollment_appointment_time','enrollment_appointment_result']);
+
+      const detailChanges = [], apptChanges = [];
+      for(const [k,label] of Object.entries(TRACKED)){
+        const oldV = String(student[k]??''), newV = String(form[k]??'');
+        if(oldV !== newV && (oldV||newV)){
+          const line = `${label}: ${oldV||'—'} → ${newV||'—'}`;
+          if(APPT_KEYS.has(k)) apptChanges.push(line);
+          else detailChanges.push(line);
+        }
+      }
+
+      const updatedForm = {...form, student_age: form.student_dob ? calcAge(form.student_dob) : (form.student_age||'')};
+      await db.collection('students').doc(studentId).update({...updatedForm, updated_at: firebase.firestore.FieldValue.serverTimestamp()});
+
+      const actRef = db.collection('students').doc(studentId).collection('activities');
+      const who = user.displayName||user.email;
+      const ts = firebase.firestore.FieldValue.serverTimestamp();
+      if(detailChanges.length>0) await actRef.add({ type:'update', created_by:who, created_at:ts, content:'Student details updated:\n'+detailChanges.map(l=>`• ${l}`).join('\n') });
+      if(apptChanges.length>0) await actRef.add({ type:'appointment', created_by:who, created_at:ts, content:'Enrollment appointment updated:\n'+apptChanges.map(l=>`• ${l}`).join('\n') });
+
       setSaved(true); setTimeout(()=>setSaved(false),2000);
     } finally { setSaving(false); }
   }
@@ -1545,19 +1598,12 @@ function StudentProfile({ studentId, user, onBack }) {
                 <span className="text-xs text-gray-400 font-medium whitespace-nowrap">Assigned:</span>
                 <AssignedInput studentId={studentId} value={student.lead_owner||''} onSave={v=>updateField({lead_owner:v})} />
               </div>
-              {/* Call button */}
-              {contactPhone && (
-                <a href={`tel:${contactPhone}`}
-                  className="flex items-center gap-1.5 border border-gray-200 rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-gray-50 transition mt-1">
-                  📞 Call
-                </a>
-              )}
             </div>
           </div>
 
           {/* Tabs */}
           <div className="flex gap-1">
-            {[['activity','Overview'],['details','Details'],['documents','Documents']].map(([k,l])=>(
+            {[['activity','Overview'],['details','Student Details'],['documents','Student Documents']].map(([k,l])=>(
               <button key={k} onClick={()=>setTab(k)}
                 className={`px-4 py-2.5 text-sm font-semibold transition border-b-2 ${tab===k?'border-green-700 text-green-700':'border-transparent text-gray-400 hover:text-gray-600'}`}
                 style={tab===k?{borderColor:'#5ba300',color:'#5ba300'}:{}}>
