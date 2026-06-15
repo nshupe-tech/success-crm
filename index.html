@@ -28,6 +28,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet" />
+  <script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
   <style>
     body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f7f8fa; }
     .fade-in { animation: fadeIn 0.18s ease-in; }
@@ -40,6 +42,11 @@
     .appointment-card { border-left: 4px solid #2563eb; background: #eff6ff; }
     .update-card      { border-left: 4px solid #94a3b8; background: #f8fafc; }
     ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background:#f1f1f1; } ::-webkit-scrollbar-thumb { background:#ccc; border-radius:3px; }
+    .ql-container { font-family: 'Inter', sans-serif; font-size: 14px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
+    .ql-toolbar { border-top-left-radius: 12px; border-top-right-radius: 12px; background: #f9fafb; }
+    .ql-container, .ql-toolbar { border-color: #e5e7eb !important; }
+    .ql-editor { min-height: 200px; }
+    .ql-editor.ql-blank::before { color: #9ca3af; font-style: normal; }
   </style>
 </head>
 <body class="text-gray-800">
@@ -458,6 +465,97 @@ function ReportsTab() {
 }
 
 // ─── ADMIN PAGE ───────────────────────────────────────────────────────────────
+// ─── QUILL RICH TEXT EDITOR ──────────────────────────────────────────────────
+function QuillEditor({ initialValue, onChange, placeholder }) {
+  const containerRef = useRef(null);
+  const quillRef     = useRef(null);
+
+  useEffect(() => {
+    if (quillRef.current) return;
+    quillRef.current = new Quill(containerRef.current, {
+      theme: 'snow',
+      placeholder: placeholder || 'Write your email body here…',
+      modules: {
+        toolbar: [
+          ['bold','italic','underline','strike'],
+          [{ header:[1,2,3,false] }],
+          [{ list:'ordered' },{ list:'bullet' }],
+          [{ color:[] },{ background:[] }],
+          ['link','image'],
+          ['clean'],
+        ]
+      }
+    });
+    if (initialValue) quillRef.current.root.innerHTML = initialValue;
+    quillRef.current.on('text-change', () => {
+      onChange(quillRef.current.root.innerHTML);
+    });
+  }, []);
+
+  return <div ref={containerRef} />;
+}
+
+// ─── AI EMAIL WRITER ──────────────────────────────────────────────────────────
+function AIEmailWriter({ onInsert }) {
+  const [prompt, setPrompt]   = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState('');
+  const [open, setOpen]       = useState(false);
+
+  async function generate() {
+    if (!prompt.trim()) return;
+    setLoading(true); setError('');
+    try {
+      const res = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: prompt.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'AI request failed');
+      onInsert(data.html);
+      setPrompt(''); setOpen(false);
+    } catch(e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mb-4">
+      {!open ? (
+        <button onClick={()=>setOpen(true)}
+          className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl border border-purple-200 text-purple-600 hover:bg-purple-50 transition">
+          ✨ Write with AI
+        </button>
+      ) : (
+        <div className="bg-purple-50 border border-purple-200 rounded-2xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-bold text-purple-700">✨ AI Email Writer</span>
+            <button onClick={()=>{setOpen(false);setError('');}} className="text-purple-400 hover:text-purple-600 text-lg leading-none">×</button>
+          </div>
+          <p className="text-xs text-purple-500 mb-2">Describe the email you need and AI will draft the body for you to edit.</p>
+          <textarea
+            className="w-full border border-purple-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 resize-none mb-3"
+            style={{minHeight:'80px','--tw-ring-color':'#a855f7'}}
+            placeholder="e.g. A warm follow-up email to a student who missed their enrollment appointment, encouraging them to reschedule…"
+            value={prompt} onChange={e=>setPrompt(e.target.value)} />
+          {error && <p className="text-xs text-red-500 mb-2">{error}</p>}
+          <div className="flex gap-2">
+            <button onClick={generate} disabled={loading||!prompt.trim()}
+              className="text-white px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 hover:opacity-90"
+              style={{background:'#7c3aed'}}>
+              {loading ? 'Writing…' : 'Generate Draft'}
+            </button>
+            <button onClick={()=>{setOpen(false);setError('');}} className="text-purple-400 text-sm px-2">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminPage({ user }) {
   const [adminEmails, setAdminEmails] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -477,6 +575,8 @@ function AdminPage({ user }) {
   const [newNotifEmail, setNewNotifEmail] = useState('');
   const [newDailySumEmail, setNewDailySumEmail] = useState('');
   const [newLeadSource, setNewLeadSource] = useState('');
+  const [newStage, setNewStage] = useState('');
+  const [newApptResult, setNewApptResult] = useState('');
   const [savingSection, setSavingSection] = useState('');
 
   useEffect(() => {
@@ -628,8 +728,13 @@ function AdminPage({ user }) {
                     <input className={FIELD_CLS} value={editTemplate.subject} onChange={e=>setEditTemplate(t=>({...t,subject:e.target.value}))} placeholder="Email subject…" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-gray-500 mb-1">Body <span className="font-normal text-gray-400">(use {'{'}student_name{'}'} or {'{'}guardian_name{'}'} as placeholders)</span></label>
-                    <textarea className={`${FIELD_CLS} min-h-[160px] resize-none`} value={editTemplate.body} onChange={e=>setEditTemplate(t=>({...t,body:e.target.value}))} />
+                    <label className="block text-xs font-semibold text-gray-500 mb-2">Body <span className="font-normal text-gray-400">(use {'{'}student_name{'}'} or {'{'}guardian_name{'}'} as placeholders)</span></label>
+                    <AIEmailWriter onInsert={html => setEditTemplate(t=>({...t,body:html,_quillKey:(t._quillKey||0)+1}))} />
+                    <QuillEditor
+                      key={`${editTemplate.isNew ? 'new' : editTemplate.index}-${editTemplate._quillKey||0}`}
+                      initialValue={editTemplate.body}
+                      onChange={html => setEditTemplate(t=>({...t,body:html}))}
+                    />
                   </div>
                 </div>
                 <div className="flex gap-2 mt-4">
@@ -656,7 +761,7 @@ function AdminPage({ user }) {
                         <div className="flex-1 min-w-0">
                           <div className="font-bold text-gray-800">{t.name}</div>
                           <div className="text-xs text-gray-500 mt-0.5">{t.subject}</div>
-                          <div className="text-sm text-gray-400 mt-2 line-clamp-2 whitespace-pre-wrap">{t.body}</div>
+                          <div className="text-sm text-gray-400 mt-2 line-clamp-2" dangerouslySetInnerHTML={{__html: t.body}} />
                         </div>
                         <div className="flex gap-2 flex-shrink-0">
                           <button onClick={()=>setEditTemplate({...t,index:i,isNew:false})} className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50">Edit</button>
@@ -948,25 +1053,69 @@ function AdminPage({ user }) {
             {/* Enrollment Stages */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-4">
               <h3 className="font-bold text-gray-800 mb-1">Enrollment Stages</h3>
-              <p className="text-sm text-gray-400 mb-3">Track where a student is in the enrollment pipeline.</p>
+              <p className="text-sm text-gray-400 mb-4">Track where a student is in the enrollment pipeline.</p>
+              <div className="flex gap-2 mb-3">
+                <input className={FIELD_CLS} placeholder="Add stage…" value={newStage}
+                  onChange={e=>setNewStage(e.target.value)}
+                  onKeyDown={async e=>{
+                    if(e.key!=='Enter'||!newStage.trim()) return;
+                    const base = crmConfig.stages&&crmConfig.stages.length ? crmConfig.stages : ['New Inquiry','Contacted','Appointment Set','Enrolled','Not Qualified','Lost'];
+                    const updated={...crmConfig,stages:[...base,newStage.trim()]};
+                    setCrmConfig(updated); await saveCrmConfig(updated); setNewStage('');
+                  }} />
+                <button onClick={async()=>{
+                  if(!newStage.trim()) return;
+                  const base = crmConfig.stages&&crmConfig.stages.length ? crmConfig.stages : ['New Inquiry','Contacted','Appointment Set','Enrolled','Not Qualified','Lost'];
+                  const updated={...crmConfig,stages:[...base,newStage.trim()]};
+                  setCrmConfig(updated); await saveCrmConfig(updated); setNewStage('');
+                }} className="text-white px-4 py-2 rounded-xl text-sm font-semibold hover:opacity-90 flex-shrink-0" style={{background:'#5ba300'}}>Add</button>
+              </div>
               <div className="flex flex-wrap gap-2">
-                {['New Inquiry','Contacted','Appointment Set','Enrolled','Not Qualified','Lost'].map((s,i)=>(
-                  <span key={i} className="bg-blue-50 text-blue-700 rounded-lg px-3 py-1.5 text-sm font-medium">{s}</span>
+                {(crmConfig.stages&&crmConfig.stages.length ? crmConfig.stages : ['New Inquiry','Contacted','Appointment Set','Enrolled','Not Qualified','Lost']).map((s,i)=>(
+                  <div key={i} className="flex items-center gap-1.5 bg-blue-50 text-blue-700 rounded-lg px-3 py-1.5 text-sm font-medium">
+                    {s}
+                    <button onClick={async()=>{
+                      const base=crmConfig.stages&&crmConfig.stages.length?crmConfig.stages:['New Inquiry','Contacted','Appointment Set','Enrolled','Not Qualified','Lost'];
+                      const updated={...crmConfig,stages:base.filter((_,j)=>j!==i)};
+                      setCrmConfig(updated); await saveCrmConfig(updated);
+                    }} className="text-blue-400 hover:text-red-500 ml-0.5 font-bold text-xs">✕</button>
+                  </div>
                 ))}
               </div>
-              <p className="text-xs text-gray-300 mt-3">Custom stage editing coming soon.</p>
             </div>
 
             {/* Appointment Results */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
               <h3 className="font-bold text-gray-800 mb-1">Appointment Results</h3>
-              <p className="text-sm text-gray-400 mb-3">Outcomes that can be recorded after an enrollment appointment.</p>
+              <p className="text-sm text-gray-400 mb-4">Outcomes that can be recorded after an enrollment appointment.</p>
+              <div className="flex gap-2 mb-3">
+                <input className={FIELD_CLS} placeholder="Add result…" value={newApptResult}
+                  onChange={e=>setNewApptResult(e.target.value)}
+                  onKeyDown={async e=>{
+                    if(e.key!=='Enter'||!newApptResult.trim()) return;
+                    const base=crmConfig.apptResults&&crmConfig.apptResults.length?crmConfig.apptResults:[...APPOINTMENT_RESULTS];
+                    const updated={...crmConfig,apptResults:[...base,newApptResult.trim()]};
+                    setCrmConfig(updated); await saveCrmConfig(updated); setNewApptResult('');
+                  }} />
+                <button onClick={async()=>{
+                  if(!newApptResult.trim()) return;
+                  const base=crmConfig.apptResults&&crmConfig.apptResults.length?crmConfig.apptResults:[...APPOINTMENT_RESULTS];
+                  const updated={...crmConfig,apptResults:[...base,newApptResult.trim()]};
+                  setCrmConfig(updated); await saveCrmConfig(updated); setNewApptResult('');
+                }} className="text-white px-4 py-2 rounded-xl text-sm font-semibold hover:opacity-90 flex-shrink-0" style={{background:'#5ba300'}}>Add</button>
+              </div>
               <div className="flex flex-wrap gap-2">
-                {APPOINTMENT_RESULTS.map((s,i)=>(
-                  <span key={i} className="bg-purple-50 text-purple-700 rounded-lg px-3 py-1.5 text-sm font-medium">{s}</span>
+                {(crmConfig.apptResults&&crmConfig.apptResults.length?crmConfig.apptResults:[...APPOINTMENT_RESULTS]).map((s,i)=>(
+                  <div key={i} className="flex items-center gap-1.5 bg-purple-50 text-purple-700 rounded-lg px-3 py-1.5 text-sm font-medium">
+                    {s}
+                    <button onClick={async()=>{
+                      const base=crmConfig.apptResults&&crmConfig.apptResults.length?crmConfig.apptResults:[...APPOINTMENT_RESULTS];
+                      const updated={...crmConfig,apptResults:base.filter((_,j)=>j!==i)};
+                      setCrmConfig(updated); await saveCrmConfig(updated);
+                    }} className="text-purple-400 hover:text-red-500 ml-0.5 font-bold text-xs">✕</button>
+                  </div>
                 ))}
               </div>
-              <p className="text-xs text-gray-300 mt-3">Custom result editing coming soon.</p>
             </div>
           </div>
         )}
