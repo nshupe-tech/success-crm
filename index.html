@@ -281,6 +281,177 @@ function QuickInfoSidebar({ student }) {
   );
 }
 
+// ─── REPORTS TAB ─────────────────────────────────────────────────────────────
+const REPORT_FIELDS = [
+  { key:'student_first_name',   label:'First Name' },
+  { key:'student_last_name',    label:'Last Name' },
+  { key:'student_phone',        label:'Student Phone' },
+  { key:'student_email',        label:'Student Email' },
+  { key:'dob',                  label:'Date of Birth' },
+  { key:'guardian_first_name',  label:'Guardian First Name' },
+  { key:'guardian_last_name',   label:'Guardian Last Name' },
+  { key:'guardian_phone',       label:'Guardian Phone' },
+  { key:'guardian_email',       label:'Guardian Email' },
+  { key:'learning_center',      label:'Learning Center' },
+  { key:'lead_status',          label:'Lead Status' },
+  { key:'source',               label:'How They Heard About Us' },
+  { key:'enrollment_appointment_time',   label:'Appointment Date/Time' },
+  { key:'enrollment_appointment_result', label:'Appointment Result' },
+  { key:'center_address',       label:'Center Address' },
+  { key:'center_phone',         label:'Center Phone' },
+  { key:'created_at',           label:'Date Added' },
+];
+
+const PRESET_REPORTS = [
+  { id:'all',           label:'All Students',              desc:'Every student in the CRM',                filter: ()=>true },
+  { id:'enrolled',      label:'Enrolled Students',         desc:'Appointment completed — enrolled',         filter: l=>l.lead_status==='Appointment Completed – Enrolled' },
+  { id:'appt_sched',    label:'Appointments Scheduled',    desc:'Status = Appointment Scheduled',           filter: l=>l.lead_status==='Appointment Scheduled' },
+  { id:'sts',           label:'Sent to Student Services',  desc:'Documents sent, awaiting processing',      filter: l=>l.lead_status==='Sent to Student Services' },
+  { id:'not_qualified', label:'Not Qualified',             desc:'Leads that did not qualify',               filter: l=>l.lead_status==='Not Qualified' },
+  { id:'new_30',        label:'New Inquiries – Last 30 Days', desc:'Students added in the past 30 days',   filter: l=>{ const d=l.created_at?.toDate?.(); return d && d >= new Date(Date.now()-30*864e5); } },
+  { id:'appt_month',    label:'Appointments This Month',   desc:'Appointments in the current calendar month', filter: l=>{
+    if(!l.enrollment_appointment_time) return false;
+    const d=new Date(l.enrollment_appointment_time), now=new Date();
+    return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
+  }},
+];
+
+const DEFAULT_FIELDS = ['student_first_name','student_last_name','student_phone','student_email','learning_center','lead_status'];
+
+function ReportsTab() {
+  const [leads, setLeads] = useState([]);
+  const [loadingLeads, setLoadingLeads] = useState(true);
+  const [selectedPreset, setSelectedPreset] = useState('all');
+  const [selectedFields, setSelectedFields] = useState(DEFAULT_FIELDS);
+  const [preview, setPreview] = useState(null); // rows to show in preview table
+
+  useEffect(()=>{
+    return db.collection('students').onSnapshot(snap=>{
+      setLeads(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoadingLeads(false);
+    });
+  },[]);
+
+  const preset = PRESET_REPORTS.find(p=>p.id===selectedPreset);
+  const filteredLeads = leads.filter(preset.filter);
+
+  function toggleField(key) {
+    setSelectedFields(f => f.includes(key) ? f.filter(k=>k!==key) : [...f, key]);
+  }
+
+  function getDisplayVal(lead, key) {
+    const val = lead[key];
+    if (!val) return '';
+    if (key === 'created_at') {
+      const d = val?.toDate?.(); return d ? d.toLocaleDateString() : '';
+    }
+    if (key === 'enrollment_appointment_time') {
+      return new Date(val).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+    }
+    return val;
+  }
+
+  function downloadCSV() {
+    const orderedFields = REPORT_FIELDS.filter(f => selectedFields.includes(f.key));
+    const header = orderedFields.map(f => `"${f.label}"`).join(',');
+    const rows = filteredLeads.map(l =>
+      orderedFields.map(f => `"${(getDisplayVal(l, f.key)||'').replace(/"/g,'""')}"`).join(',')
+    );
+    const csv = [header, ...rows].join('\n');
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${preset.label.replace(/[^a-z0-9]/gi,'_')}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  if (loadingLeads) return <div className="py-16 text-center text-gray-400 text-sm">Loading student data…</div>;
+
+  const orderedFields = REPORT_FIELDS.filter(f => selectedFields.includes(f.key));
+
+  return (
+    <div>
+      <p className="text-sm text-gray-500 mb-5">Choose a report type, select the fields to include, then preview or export to CSV.</p>
+
+      {/* Preset selector */}
+      <div className="mb-5">
+        <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Report Type</label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {PRESET_REPORTS.map(p => (
+            <button key={p.id} onClick={() => setSelectedPreset(p.id)}
+              className={`text-left px-4 py-3 rounded-xl border text-sm transition ${selectedPreset===p.id ? 'border-transparent text-white' : 'border-gray-200 text-gray-700 hover:border-gray-300 bg-white'}`}
+              style={selectedPreset===p.id?{background:'#3b4f5f'}:{}}>
+              <div className="font-semibold">{p.label}</div>
+              <div className={`text-xs mt-0.5 ${selectedPreset===p.id?'text-white/70':'text-gray-400'}`}>{p.desc}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Field picker */}
+      <div className="mb-5 bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+        <div className="flex items-center justify-between mb-3">
+          <label className="text-xs font-bold uppercase tracking-wider text-gray-500">Fields to Include</label>
+          <div className="flex gap-2">
+            <button onClick={()=>setSelectedFields(REPORT_FIELDS.map(f=>f.key))} className="text-xs text-gray-400 hover:text-gray-600">Select All</button>
+            <span className="text-gray-200">|</span>
+            <button onClick={()=>setSelectedFields(DEFAULT_FIELDS)} className="text-xs text-gray-400 hover:text-gray-600">Reset</button>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {REPORT_FIELDS.map(f => (
+            <label key={f.key} className="flex items-center gap-2 cursor-pointer group">
+              <input type="checkbox" checked={selectedFields.includes(f.key)} onChange={()=>toggleField(f.key)}
+                className="w-4 h-4 rounded accent-green-600 cursor-pointer" />
+              <span className="text-sm text-gray-600 group-hover:text-gray-900 transition">{f.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-3 mb-5">
+        <button onClick={downloadCSV} disabled={selectedFields.length===0}
+          className="text-white px-5 py-2.5 rounded-xl font-semibold text-sm disabled:opacity-40 hover:opacity-90 flex items-center gap-2" style={{background:'#5ba300'}}>
+          ⬇️ Export CSV ({filteredLeads.length} {filteredLeads.length===1?'student':'students'})
+        </button>
+        <button onClick={()=>setPreview(preview?null:filteredLeads)}
+          className="px-5 py-2.5 rounded-xl font-semibold text-sm border border-gray-200 bg-white hover:bg-gray-50 text-gray-600">
+          {preview ? 'Hide Preview' : 'Preview Data'}
+        </button>
+      </div>
+
+      {/* Preview table */}
+      {preview && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto">
+          {preview.length === 0 ? (
+            <div className="p-8 text-center text-gray-400 text-sm">No students match this report filter.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  {orderedFields.map(f=>(
+                    <th key={f.key} className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-400 whitespace-nowrap">{f.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {preview.slice(0,50).map((l,i)=>(
+                  <tr key={l.id} className={i%2===0?'bg-white':'bg-gray-50/50'}>
+                    {orderedFields.map(f=>(
+                      <td key={f.key} className="px-4 py-2.5 text-gray-700 whitespace-nowrap max-w-[200px] truncate">{getDisplayVal(l,f.key)||<span className="text-gray-300">—</span>}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {preview.length > 50 && <div className="text-center text-xs text-gray-400 py-3 border-t border-gray-100">Showing first 50 of {preview.length} — export CSV for full data</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ADMIN PAGE ───────────────────────────────────────────────────────────────
 function AdminPage({ user }) {
   const [adminEmails, setAdminEmails] = useState([]);
@@ -351,7 +522,7 @@ function AdminPage({ user }) {
     </div>
   );
 
-  const tabs = [['templates','📧 Email Templates'],['centers','📍 Center Info'],['admins','👤 Admin Access']];
+  const tabs = [['templates','📧 Email Templates'],['centers','📍 Center Info'],['reports','📊 Reports'],['admins','👤 Admin Access']];
 
   return (
     <div className="p-6 fade-in max-w-4xl mx-auto">
@@ -503,6 +674,9 @@ function AdminPage({ user }) {
         </div>
       )}
 
+      {/* REPORTS */}
+      {activeTab === 'reports' && <ReportsTab />}
+
       {/* ADMIN ACCESS */}
       {activeTab === 'admins' && (
         <div>
@@ -572,32 +746,89 @@ function Navbar({ user, page, setPage }) {
   );
 }
 
+// ─── APPOINTMENT MODAL ───────────────────────────────────────────────────────
+function AppointmentModal({ title, students, onSelect, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:'rgba(0,0,0,0.4)'}}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[80vh]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="font-bold text-gray-900">{title}</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{students.length} appointment{students.length!==1?'s':''}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-300 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+        <div className="overflow-y-auto flex-1 p-4 space-y-2">
+          {students.length === 0 ? (
+            <p className="text-center text-gray-400 py-10 text-sm">No appointments in this window.</p>
+          ) : students.map(l => (
+            <div key={l.id} onClick={() => { onSelect(l.id); onClose(); }}
+              className="flex items-center gap-4 cursor-pointer hover:bg-gray-50 p-3 rounded-xl transition border border-gray-50 hover:border-gray-200">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                style={{background:'#3b4f5f'}}>
+                {(l.student_first_name||'?')[0]}{(l.student_last_name||'')[0]}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm text-gray-800">{l.student_first_name} {l.student_last_name}</div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  📅 {new Date(l.enrollment_appointment_time).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}
+                </div>
+                {l.learning_center && <div className="text-xs font-medium mt-0.5" style={{color:'#5ba300'}}>📍 {l.learning_center}</div>}
+              </div>
+              <StatusBadge status={l.lead_status} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── DASHBOARD ───────────────────────────────────────────────────────────────
 function DashboardPage({ onSelect }) {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [apptModal, setApptModal] = useState(null); // {title, students}
+
   useEffect(()=>{
     return db.collection('students').orderBy('created_at','desc').onSnapshot(snap=>{
       setLeads(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoading(false);
     });
   },[]);
 
-  const now = new Date(), weekAgo = new Date(now-7*864e5);
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrowStart = new Date(todayStart.getTime() + 864e5);
+  const tomorrowEnd   = new Date(todayStart.getTime() + 2*864e5);
+  const weekEnd       = new Date(todayStart.getTime() + 7*864e5);
+  const monthEnd      = new Date(todayStart.getTime() + 30*864e5);
+  const weekAgo = new Date(now - 7*864e5);
+
+  const withAppt = leads.filter(l => l.enrollment_appointment_time);
+  const apptTomorrow = withAppt.filter(l => {
+    const d = new Date(l.enrollment_appointment_time);
+    return d >= tomorrowStart && d < tomorrowEnd;
+  }).sort((a,b) => new Date(a.enrollment_appointment_time)-new Date(b.enrollment_appointment_time));
+  const apptWeek = withAppt.filter(l => {
+    const d = new Date(l.enrollment_appointment_time);
+    return d >= todayStart && d < weekEnd;
+  }).sort((a,b) => new Date(a.enrollment_appointment_time)-new Date(b.enrollment_appointment_time));
+  const apptMonth = withAppt.filter(l => {
+    const d = new Date(l.enrollment_appointment_time);
+    return d >= todayStart && d < monthEnd;
+  }).sort((a,b) => new Date(a.enrollment_appointment_time)-new Date(b.enrollment_appointment_time));
+
   const total = leads.length;
   const newWeek = leads.filter(l=>l.created_at?.toDate?.()>weekAgo).length;
   const enrolled = leads.filter(l=>l.lead_status?.includes('Enrolled')).length;
-  const appt = leads.filter(l=>l.lead_status==='Appointment Scheduled').length;
+  const apptSched = leads.filter(l=>l.lead_status==='Appointment Scheduled').length;
   const sts = leads.filter(l=>l.lead_status==='Sent to Student Services').length;
   const byStatus = LEAD_STATUSES.map(s=>({s,n:leads.filter(l=>l.lead_status===s).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n);
   const byCenter = LEARNING_CENTERS.map(c=>({c,n:leads.filter(l=>l.learning_center===c).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n);
-  const upcoming = leads.filter(l=>{
-    if(!l.enrollment_appointment_time) return false;
-    const d=new Date(l.enrollment_appointment_time); return d>=now && d<=new Date(now.getTime()+7*864e5);
-  }).sort((a,b)=>new Date(a.enrollment_appointment_time)-new Date(b.enrollment_appointment_time));
 
   if (loading) return <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Loading...</div>;
 
-  const Card = ({label,val,color,sub})=>(
+  const StatCard = ({label,val,color,sub})=>(
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 hover:shadow-md transition">
       <div className={`text-3xl font-extrabold ${color}`}>{val}</div>
       <div className="text-sm font-semibold text-gray-700 mt-1">{label}</div>
@@ -605,17 +836,47 @@ function DashboardPage({ onSelect }) {
     </div>
   );
 
+  const ApptTile = ({label, sublabel, count, students, accent}) => (
+    <button onClick={() => setApptModal({title: label, students})}
+      className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 hover:shadow-md transition text-left w-full group">
+      <div className="flex items-end justify-between">
+        <div className="text-4xl font-extrabold" style={{color: accent}}>{count}</div>
+        <span className="text-xs font-semibold text-gray-300 group-hover:text-gray-400 transition">View →</span>
+      </div>
+      <div className="text-sm font-bold text-gray-700 mt-2">{label}</div>
+      <div className="text-xs text-gray-400 mt-0.5">{sublabel}</div>
+    </button>
+  );
+
   return (
     <div className="p-6 fade-in">
+      {apptModal && <AppointmentModal title={apptModal.title} students={apptModal.students} onSelect={onSelect} onClose={()=>setApptModal(null)} />}
+
       <h1 className="text-2xl font-extrabold text-gray-900 mb-6">Dashboard</h1>
+
+      {/* Top stat row */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-        <Card label="Total Inquiries" val={total} color="text-gray-800" />
-        <Card label="New This Week" val={newWeek} color="text-blue-600" />
-        <Card label="Appt Scheduled" val={appt} color="text-purple-600" />
-        <Card label="Enrolled" val={enrolled} color="text-green-700" />
-        <Card label="Sent to Student Services" val={sts} color="text-teal-600" />
+        <StatCard label="Total Inquiries" val={total} color="text-gray-800" />
+        <StatCard label="New This Week" val={newWeek} color="text-blue-600" />
+        <StatCard label="Appt Scheduled" val={apptSched} color="text-purple-600" />
+        <StatCard label="Enrolled" val={enrolled} color="text-green-700" />
+        <StatCard label="Sent to Student Services" val={sts} color="text-teal-600" />
       </div>
 
+      {/* Upcoming appointments — 3 tiles */}
+      <div className="mb-6">
+        <h2 className="font-bold text-gray-600 text-xs uppercase tracking-wider mb-3">Upcoming Enrollment Appointments</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <ApptTile label="Tomorrow" sublabel={tomorrowStart.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}
+            count={apptTomorrow.length} students={apptTomorrow} accent="#ff7a2a" />
+          <ApptTile label="Next 7 Days" sublabel="Including today"
+            count={apptWeek.length} students={apptWeek} accent="#3b4f5f" />
+          <ApptTile label="Next 30 Days" sublabel="Including today"
+            count={apptMonth.length} students={apptMonth} accent="#5ba300" />
+        </div>
+      </div>
+
+      {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
         <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
           <h2 className="font-bold text-gray-600 text-xs uppercase tracking-wider mb-4">Inquiries by Status</h2>
@@ -651,42 +912,27 @@ function DashboardPage({ onSelect }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-          <h2 className="font-bold text-gray-600 text-xs uppercase tracking-wider mb-4">Upcoming Appointments</h2>
-          {upcoming.length===0 ? <p className="text-gray-400 text-sm">No appointments in the next 7 days.</p> : (
-            <div className="space-y-3">
-              {upcoming.map(l=>(
-                <div key={l.id} onClick={()=>onSelect(l.id)} className="cursor-pointer hover:bg-gray-50 -mx-2 px-2 py-2 rounded-xl transition">
+      {/* Recent inquiries */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+        <h2 className="font-bold text-gray-600 text-xs uppercase tracking-wider mb-4">Recent Inquiries</h2>
+        {leads.length===0 ? <p className="text-gray-400 text-sm">No leads yet.</p> : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {leads.slice(0,10).map(l=>(
+              <div key={l.id} onClick={()=>onSelect(l.id)}
+                className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 px-2 py-2 rounded-xl transition">
+                <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 text-white"
+                  style={{background:'#5ba300'}}>
+                  {(l.student_first_name||'?')[0]}{(l.student_last_name||'')[0]}
+                </div>
+                <div className="flex-1 min-w-0">
                   <div className="font-semibold text-sm text-gray-800">{l.student_first_name} {l.student_last_name}</div>
-                  <div className="text-xs text-gray-500">{new Date(l.enrollment_appointment_time).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</div>
-                  {l.learning_center && <div className="text-xs font-medium mt-0.5" style={{color:'#5ba300'}}>{l.learning_center}</div>}
+                  <div className="text-xs text-gray-400">{l.student_phone||l.contact_phone} {l.learning_center?`· ${l.learning_center}`:''}</div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-          <h2 className="font-bold text-gray-600 text-xs uppercase tracking-wider mb-4">Recent Inquiries</h2>
-          {leads.length===0 ? <p className="text-gray-400 text-sm">No leads yet.</p> : (
-            <div className="space-y-2">
-              {leads.slice(0,8).map(l=>(
-                <div key={l.id} onClick={()=>onSelect(l.id)}
-                  className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 -mx-2 px-2 py-2 rounded-xl transition">
-                  <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 text-white"
-                    style={{background:'#5ba300'}}>
-                    {(l.student_first_name||'?')[0]}{(l.student_last_name||'')[0]}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-sm text-gray-800">{l.student_first_name} {l.student_last_name}</div>
-                    <div className="text-xs text-gray-400">{l.student_phone||l.contact_phone} {l.learning_center?`· ${l.learning_center}`:''}</div>
-                  </div>
-                  <StatusBadge status={l.lead_status} />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                <StatusBadge status={l.lead_status} />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
