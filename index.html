@@ -821,10 +821,7 @@ function DashboardPage({ onSelect }) {
   const total = leads.length;
   const newWeek = leads.filter(l=>l.created_at?.toDate?.()>weekAgo).length;
   const enrolled = leads.filter(l=>l.lead_status?.includes('Enrolled')).length;
-  const apptSched = leads.filter(l=>l.lead_status==='Appointment Scheduled').length;
   const sts = leads.filter(l=>l.lead_status==='Sent to Student Services').length;
-  const byStatus = LEAD_STATUSES.map(s=>({s,n:leads.filter(l=>l.lead_status===s).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n);
-  const byCenter = LEARNING_CENTERS.map(c=>({c,n:leads.filter(l=>l.learning_center===c).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n);
 
   if (loading) return <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Loading...</div>;
 
@@ -855,10 +852,9 @@ function DashboardPage({ onSelect }) {
       <h1 className="text-2xl font-extrabold text-gray-900 mb-6">Dashboard</h1>
 
       {/* Top stat row */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <StatCard label="Total Inquiries" val={total} color="text-gray-800" />
         <StatCard label="New This Week" val={newWeek} color="text-blue-600" />
-        <StatCard label="Appt Scheduled" val={apptSched} color="text-purple-600" />
         <StatCard label="Enrolled" val={enrolled} color="text-green-700" />
         <StatCard label="Sent to Student Services" val={sts} color="text-teal-600" />
       </div>
@@ -873,42 +869,6 @@ function DashboardPage({ onSelect }) {
             count={apptWeek.length} students={apptWeek} accent="#3b4f5f" />
           <ApptTile label="Next 30 Days" sublabel="Including today"
             count={apptMonth.length} students={apptMonth} accent="#5ba300" />
-        </div>
-      </div>
-
-      {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-          <h2 className="font-bold text-gray-600 text-xs uppercase tracking-wider mb-4">Inquiries by Status</h2>
-          {byStatus.length===0 ? <p className="text-gray-400 text-sm">No leads yet.</p> : (
-            <div className="space-y-2.5">
-              {byStatus.map(({s,n})=>{
-                const pct=total>0?Math.round(n/total*100):0;
-                return (
-                  <div key={s} className="flex items-center gap-3">
-                    <div className="w-52 text-xs text-gray-500 truncate">{s}</div>
-                    <div className="flex-1 bg-gray-100 rounded-full h-2">
-                      <div className="h-2 rounded-full" style={{width:`${pct}%`,background:'#5ba300'}} />
-                    </div>
-                    <div className="text-sm font-bold text-gray-700 w-7 text-right">{n}</div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-          <h2 className="font-bold text-gray-600 text-xs uppercase tracking-wider mb-4">By Learning Center</h2>
-          {byCenter.length===0 ? <p className="text-gray-400 text-sm">No data yet.</p> : (
-            <div className="space-y-3">
-              {byCenter.map(({c,n})=>(
-                <div key={c} className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">{c}</span>
-                  <span className="text-sm font-bold bg-green-50 text-green-800 px-2.5 py-0.5 rounded-full">{n}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
