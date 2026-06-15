@@ -218,6 +218,325 @@ function StageBadge({ stageKey }) {
   return <span className={`status-badge ${s.color}`}>{s.label}</span>;
 }
 
+// ─── QUICK INFO SIDEBAR ───────────────────────────────────────────────────────
+function QuickInfoSidebar({ student }) {
+  const InfoRow = ({ icon, label, value, href }) => {
+    if (!value) return null;
+    return (
+      <div className="mb-3">
+        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-0.5">{label}</div>
+        {href ? (
+          <a href={href} className="text-sm font-medium hover:underline flex items-center gap-1" style={{color:'#3b4f5f'}}>
+            <span>{icon}</span> {value}
+          </a>
+        ) : (
+          <div className="text-sm text-gray-700 flex items-center gap-1"><span>{icon}</span> {value}</div>
+        )}
+      </div>
+    );
+  };
+  return (
+    <div className="w-64 flex-shrink-0 space-y-3">
+      {/* Student */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+        <div className="text-xs font-bold uppercase tracking-widest mb-3 pb-2 border-b border-gray-100" style={{color:'#3b4f5f'}}>Student</div>
+        <InfoRow icon="📞" label="Phone" value={student.student_phone} href={student.student_phone ? `tel:${student.student_phone}` : null} />
+        <InfoRow icon="📧" label="Email" value={student.student_email} href={student.student_email ? `mailto:${student.student_email}` : null} />
+        {!student.student_phone && !student.student_email && (
+          <p className="text-xs text-gray-400">No contact info on file.</p>
+        )}
+      </div>
+      {/* Guardian */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+        <div className="text-xs font-bold uppercase tracking-widest mb-3 pb-2 border-b border-gray-100" style={{color:'#3b4f5f'}}>Parent / Guardian</div>
+        {(student.guardian_first_name || student.guardian_last_name) && (
+          <div className="text-sm font-semibold text-gray-700 mb-2">
+            {student.guardian_first_name} {student.guardian_last_name}
+          </div>
+        )}
+        <InfoRow icon="📞" label="Phone" value={student.guardian_phone} href={student.guardian_phone ? `tel:${student.guardian_phone}` : null} />
+        <InfoRow icon="📧" label="Email" value={student.guardian_email} href={student.guardian_email ? `mailto:${student.guardian_email}` : null} />
+        {!student.guardian_phone && !student.guardian_email && !student.guardian_first_name && (
+          <p className="text-xs text-gray-400">No guardian info on file.</p>
+        )}
+      </div>
+      {/* Enrollment quick view */}
+      {(student.enrollment_appointment_time || student.learning_center) && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+          <div className="text-xs font-bold uppercase tracking-widest mb-3 pb-2 border-b border-gray-100" style={{color:'#3b4f5f'}}>Enrollment</div>
+          <InfoRow icon="📍" label="Center" value={student.learning_center} />
+          {student.center_address && <InfoRow icon="🏠" label="Address" value={student.center_address} />}
+          {student.enrollment_appointment_time && (
+            <div className="mb-2">
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Appointment</div>
+              <div className="text-sm text-gray-700">
+                {new Date(student.enrollment_appointment_time).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})}
+              </div>
+            </div>
+          )}
+          {student.enrollment_appointment_result && <InfoRow icon="✅" label="Result" value={student.enrollment_appointment_result} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ADMIN PAGE ───────────────────────────────────────────────────────────────
+function AdminPage({ user }) {
+  const [adminEmails, setAdminEmails] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [centers, setCenters] = useState([]);
+  const [access, setAccess] = useState('checking'); // 'checking' | 'granted' | 'denied'
+  const [activeTab, setActiveTab] = useState('templates');
+  const [newAdminEmail, setNewAdminEmail] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [editTemplate, setEditTemplate] = useState(null);
+  const [editCenter, setEditCenter] = useState(null);
+
+  useEffect(() => {
+    const checkAccess = async () => {
+      const doc = await db.collection('settings').doc('admins').get();
+      if (!doc.exists) {
+        // First time: make current user admin
+        await db.collection('settings').doc('admins').set({ emails: [user.email] });
+        setAdminEmails([user.email]);
+        setAccess('granted');
+      } else {
+        const emails = doc.data().emails || [];
+        setAdminEmails(emails);
+        setAccess(emails.includes(user.email) ? 'granted' : 'denied');
+      }
+    };
+    checkAccess();
+  }, []);
+
+  useEffect(() => {
+    if (access !== 'granted') return;
+    const u1 = db.collection('settings').doc('email_templates').onSnapshot(snap => {
+      setTemplates(snap.exists ? (snap.data().list || []) : []);
+    });
+    const u2 = db.collection('settings').doc('centers').onSnapshot(snap => {
+      setCenters(snap.exists ? (snap.data().list || []) : []);
+    });
+    return () => { u1(); u2(); };
+  }, [access]);
+
+  async function saveTemplates(list) {
+    await db.collection('settings').doc('email_templates').set({ list });
+  }
+  async function saveCenters(list) {
+    await db.collection('settings').doc('centers').set({ list });
+  }
+  async function addAdminEmail() {
+    if (!newAdminEmail.trim()) return;
+    const updated = [...adminEmails, newAdminEmail.trim()];
+    await db.collection('settings').doc('admins').set({ emails: updated });
+    setAdminEmails(updated); setNewAdminEmail('');
+  }
+  async function removeAdminEmail(email) {
+    if (email === user.email) { alert("You can't remove yourself."); return; }
+    const updated = adminEmails.filter(e => e !== email);
+    await db.collection('settings').doc('admins').set({ emails: updated });
+    setAdminEmails(updated);
+  }
+
+  if (access === 'checking') return <div className="flex items-center justify-center h-64 text-gray-400">Checking access…</div>;
+  if (access === 'denied') return (
+    <div className="flex items-center justify-center h-64 text-center">
+      <div>
+        <div className="text-4xl mb-3">🔒</div>
+        <div className="font-bold text-gray-700 mb-1">Access Restricted</div>
+        <div className="text-sm text-gray-400">This page is for administrators only.<br/>Contact your admin to request access.</div>
+      </div>
+    </div>
+  );
+
+  const tabs = [['templates','📧 Email Templates'],['centers','📍 Center Info'],['admins','👤 Admin Access']];
+
+  return (
+    <div className="p-6 fade-in max-w-4xl mx-auto">
+      <h1 className="text-2xl font-extrabold text-gray-900 mb-1">Admin Settings</h1>
+      <p className="text-sm text-gray-400 mb-6">Manage email templates, center information, and admin access.</p>
+
+      <div className="flex gap-2 mb-6 border-b border-gray-100 pb-0">
+        {tabs.map(([k,l]) => (
+          <button key={k} onClick={() => setActiveTab(k)}
+            className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition ${activeTab===k ? 'border-green-600 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+            style={activeTab===k?{borderColor:'#5ba300',color:'#5ba300'}:{}}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* EMAIL TEMPLATES */}
+      {activeTab === 'templates' && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm text-gray-500">Templates are available when emailing a student from their profile.</p>
+            <button onClick={() => setEditTemplate({ name:'', subject:'', body:'', isNew:true })}
+              className="text-white px-4 py-2 rounded-xl text-sm font-semibold hover:opacity-90" style={{background:'#5ba300'}}>
+              + New Template
+            </button>
+          </div>
+          {editTemplate && (
+            <div className="bg-gray-50 rounded-2xl p-5 mb-5 border border-gray-200">
+              <h3 className="font-bold text-sm mb-3" style={{color:'#3b4f5f'}}>{editTemplate.isNew ? 'New Template' : 'Edit Template'}</h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">Template Name</label>
+                  <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                    value={editTemplate.name} onChange={e => setEditTemplate(t=>({...t,name:e.target.value}))} placeholder="e.g. Welcome Email" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">Subject Line</label>
+                  <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                    value={editTemplate.subject} onChange={e => setEditTemplate(t=>({...t,subject:e.target.value}))} placeholder="Email subject..." />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">Body <span className="font-normal text-gray-400">(use {'{'}student_name{'}'} or {'{'}guardian_name{'}'} as placeholders)</span></label>
+                  <textarea className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 min-h-[140px] resize-none"
+                    value={editTemplate.body} onChange={e => setEditTemplate(t=>({...t,body:e.target.value}))} />
+                </div>
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button onClick={async () => {
+                  setSaving(true);
+                  const list = editTemplate.isNew
+                    ? [...templates, {name:editTemplate.name,subject:editTemplate.subject,body:editTemplate.body}]
+                    : templates.map((t,i) => i===editTemplate.index ? {name:editTemplate.name,subject:editTemplate.subject,body:editTemplate.body} : t);
+                  await saveTemplates(list); setEditTemplate(null); setSaving(false);
+                }} disabled={saving || !editTemplate.name || !editTemplate.subject}
+                  className="text-white px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 hover:opacity-90" style={{background:'#5ba300'}}>
+                  {saving?'Saving…':'Save Template'}
+                </button>
+                <button onClick={() => setEditTemplate(null)} className="text-gray-400 text-sm px-2">Cancel</button>
+              </div>
+            </div>
+          )}
+          {templates.length === 0 ? (
+            <div className="text-center py-12 text-gray-300"><div className="text-4xl mb-2">📧</div><div className="text-sm">No templates yet.</div></div>
+          ) : (
+            <div className="space-y-3">
+              {templates.map((t, i) => (
+                <div key={i} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-gray-800">{t.name}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{t.subject}</div>
+                      <div className="text-sm text-gray-400 mt-2 whitespace-pre-wrap line-clamp-2">{t.body}</div>
+                    </div>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <button onClick={() => setEditTemplate({...t,index:i,isNew:false})}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50">Edit</button>
+                      <button onClick={async () => { if(!confirm('Delete this template?')) return; const list=templates.filter((_,j)=>j!==i); await saveTemplates(list); }}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-red-100 text-red-400 hover:bg-red-50">Delete</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CENTER INFO */}
+      {activeTab === 'centers' && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm text-gray-500">Store address, phone, and email for each learning center.</p>
+            <button onClick={() => setEditCenter({ name:'', address:'', phone:'', email:'', isNew:true })}
+              className="text-white px-4 py-2 rounded-xl text-sm font-semibold hover:opacity-90" style={{background:'#5ba300'}}>
+              + Add Center
+            </button>
+          </div>
+          {editCenter && (
+            <div className="bg-gray-50 rounded-2xl p-5 mb-5 border border-gray-200">
+              <h3 className="font-bold text-sm mb-3" style={{color:'#3b4f5f'}}>{editCenter.isNew ? 'New Center' : 'Edit Center'}</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {[['name','Center Name','e.g. Monroe'],['address','Address','123 Main St, Monroe, MI'],['phone','Phone','(555) 555-5555'],['email','Email','center@successmichigan.org']].map(([k,l,p])=>(
+                  <div key={k} className={k==='address'?'col-span-2':''}>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">{l}</label>
+                    <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                      placeholder={p} value={editCenter[k]} onChange={e=>setEditCenter(c=>({...c,[k]:e.target.value}))} />
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button onClick={async () => {
+                  setSaving(true);
+                  const list = editCenter.isNew
+                    ? [...centers, {name:editCenter.name,address:editCenter.address,phone:editCenter.phone,email:editCenter.email}]
+                    : centers.map((c,i)=>i===editCenter.index?{name:editCenter.name,address:editCenter.address,phone:editCenter.phone,email:editCenter.email}:c);
+                  await saveCenters(list); setEditCenter(null); setSaving(false);
+                }} disabled={saving||!editCenter.name}
+                  className="text-white px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 hover:opacity-90" style={{background:'#5ba300'}}>
+                  {saving?'Saving…':'Save'}
+                </button>
+                <button onClick={() => setEditCenter(null)} className="text-gray-400 text-sm px-2">Cancel</button>
+              </div>
+            </div>
+          )}
+          {centers.length === 0 ? (
+            <div className="text-center py-12 text-gray-300"><div className="text-4xl mb-2">📍</div><div className="text-sm">No centers added yet.</div></div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {centers.map((c,i) => (
+                <div key={i} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-bold text-gray-800">{c.name}</div>
+                      {c.address && <div className="text-xs text-gray-500 mt-1">📍 {c.address}</div>}
+                      {c.phone && <div className="text-xs text-gray-500 mt-0.5">📞 {c.phone}</div>}
+                      {c.email && <div className="text-xs text-gray-500 mt-0.5">📧 {c.email}</div>}
+                    </div>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <button onClick={() => setEditCenter({...c,index:i,isNew:false})}
+                        className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 font-semibold">Edit</button>
+                      <button onClick={async () => { if(!confirm('Delete this center?')) return; await saveCenters(centers.filter((_,j)=>j!==i)); }}
+                        className="text-xs px-3 py-1.5 rounded-lg border border-red-100 text-red-400 hover:bg-red-50 font-semibold">Delete</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ADMIN ACCESS */}
+      {activeTab === 'admins' && (
+        <div>
+          <p className="text-sm text-gray-500 mb-4">Only these email addresses can access this Admin Settings page.</p>
+          <div className="flex gap-2 mb-5">
+            <input className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+              placeholder="Add admin email address..." value={newAdminEmail} onChange={e=>setNewAdminEmail(e.target.value)}
+              onKeyDown={e=>e.key==='Enter'&&addAdminEmail()} />
+            <button onClick={addAdminEmail} disabled={!newAdminEmail.trim()}
+              className="text-white px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 hover:opacity-90" style={{background:'#5ba300'}}>
+              Add
+            </button>
+          </div>
+          <div className="space-y-2">
+            {adminEmails.map(email => (
+              <div key={email} className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{background:'#3b4f5f'}}>
+                    {email[0].toUpperCase()}
+                  </div>
+                  <span className="text-sm text-gray-700">{email}</span>
+                  {email === user.email && <span className="text-xs text-gray-400">(you)</span>}
+                </div>
+                <button onClick={() => removeAdminEmail(email)}
+                  className="text-xs text-red-400 hover:text-red-600 font-semibold">Remove</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── NAVBAR ──────────────────────────────────────────────────────────────────
 function Navbar({ user, page, setPage }) {
   const [showUser, setShowUser] = useState(false);
@@ -228,7 +547,7 @@ function Navbar({ user, page, setPage }) {
         <span className="font-bold tracking-tight hidden sm:block">Success VLCM</span>
       </button>
       <div className="flex items-center gap-1 text-sm">
-        {[['dashboard','Dashboard'],['list','All Leads']].map(([p,label])=>(
+        {[['dashboard','Dashboard'],['list','All Leads'],['admin','⚙️ Admin']].map(([p,label])=>(
           <button key={p} onClick={()=>setPage(p)}
             className={`px-3 py-1.5 rounded-lg font-medium transition ${page===p ? 'bg-white/20' : 'hover:bg-white/10'}`}>
             {label}
@@ -585,7 +904,7 @@ function DetailsForm({ student, studentId, user }) {
   }
   const Sec = ({title,children})=>(
     <div className="mb-7">
-      <h3 className="text-xs font-bold uppercase tracking-widest mb-3 pb-2 border-b border-gray-100" style={{color:'#5ba300'}}>{title}</h3>
+      <h3 className="text-xs font-bold uppercase tracking-widest mb-3 pb-2 border-b border-gray-100" style={{color:'#3b4f5f'}}>{title}</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{children}</div>
     </div>
   );
@@ -667,11 +986,12 @@ function DetailsForm({ student, studentId, user }) {
         <F label="Assigned To"><Inp k="lead_owner" /></F>
       </Sec>
 
-      <Sec title="Enrollment">
+      <Sec title="Enrollment Appointment">
         <F label="Appointment Date / Time"><Inp k="enrollment_appointment_time" type="datetime-local" /></F>
         <F label="Appointment Result"><Sel k="enrollment_appointment_result" options={APPOINTMENT_RESULTS} /></F>
-        <F label="Center Email Contact"><Sel k="center_email" options={LEARNING_CENTERS} /></F>
+        <F label="Center"><Sel k="center_email" options={LEARNING_CENTERS} /></F>
         <F label="Center Phone"><Inp k="center_phone" type="tel" /></F>
+        <F label="Center Address" span><Inp k="center_address" placeholder="e.g. 123 Main St, Flint, MI 48501" /></F>
       </Sec>
 
       <div className="flex items-center gap-3 pt-2 pb-8">
@@ -971,9 +1291,16 @@ function StudentProfile({ studentId, user, onBack }) {
         </div>
       </div>
 
-      {/* Tab content — full width */}
+      {/* Tab content */}
       <div className="flex-1 overflow-y-auto p-6">
-        {tab==='activity' && <ActivityFeed studentId={studentId} user={user} />}
+        {tab==='activity' && (
+          <div className="flex gap-5 items-start">
+            <div className="flex-1 min-w-0">
+              <ActivityFeed studentId={studentId} user={user} />
+            </div>
+            <QuickInfoSidebar student={student} />
+          </div>
+        )}
         {tab==='details' && <DetailsForm student={student} studentId={studentId} user={user} />}
         {tab==='documents' && <DocumentsTab studentId={studentId} user={user} />}
       </div>
@@ -1067,6 +1394,7 @@ function MainApp({ user }) {
         {page==='dashboard' && <DashboardPage onSelect={openStudent} />}
         {page==='list' && <LeadsListPage user={user} onSelect={openStudent} onAddNew={()=>setShowNew(true)} />}
         {page==='student' && studentId && <StudentProfile studentId={studentId} user={user} onBack={goList} />}
+        {page==='admin' && <AdminPage user={user} />}
       </div>
     </div>
   );
