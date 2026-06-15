@@ -827,14 +827,16 @@ function DashboardPage({ onSelect }) {
   const newWeek = leads.filter(l=>l.created_at?.toDate?.()>weekAgo).length;
   const enrolled = leads.filter(l=>l.lead_status?.includes('Enrolled')).length;
   const sts = leads.filter(l=>l.lead_status==='Sent to Student Services').length;
+  const noShows = leads.filter(l=>l.enrollment_appointment_result==='No Show')
+    .sort((a,b)=>new Date(b.enrollment_appointment_time||0)-new Date(a.enrollment_appointment_time||0));
 
   if (loading) return <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Loading...</div>;
 
-  const StatCard = ({label,val,color,sub})=>(
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 hover:shadow-md transition">
+  const StatCard = ({label, val, color, sub, onClick}) => (
+    <div onClick={onClick} className={`bg-white rounded-2xl border border-gray-100 shadow-sm p-5 transition ${onClick?'cursor-pointer hover:shadow-md':''}`}>
       <div className={`text-3xl font-extrabold ${color}`}>{val}</div>
       <div className="text-sm font-semibold text-gray-700 mt-1">{label}</div>
-      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
+      {sub && <div className="text-xs mt-0.5">{sub}</div>}
     </div>
   );
 
@@ -857,11 +859,18 @@ function DashboardPage({ onSelect }) {
       <h1 className="text-2xl font-extrabold text-gray-900 mb-6">Dashboard</h1>
 
       {/* Top stat row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <StatCard label="Total Inquiries" val={total} color="text-gray-800" />
         <StatCard label="New This Week" val={newWeek} color="text-blue-600" />
         <StatCard label="Enrolled" val={enrolled} color="text-green-700" />
         <StatCard label="Sent to Student Services" val={sts} color="text-teal-600" />
+        <StatCard
+          label="No Shows — Need Contact"
+          val={noShows.length}
+          color={noShows.length>0 ? 'text-red-600' : 'text-gray-400'}
+          sub={noShows.length>0 ? <span className="text-red-400 font-semibold">Click to view ↗</span> : <span className="text-gray-400">None</span>}
+          onClick={noShows.length>0 ? ()=>setApptModal({title:'No Shows — Need Contact', students:noShows}) : null}
+        />
       </div>
 
       {/* Upcoming appointments — 3 tiles */}
