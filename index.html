@@ -469,6 +469,16 @@ function AdminPage({ user }) {
   const [editTemplate, setEditTemplate] = useState(null);
   const [editCenter, setEditCenter] = useState(null);
 
+  // New settings state
+  const [emailConfig, setEmailConfig] = useState({ senderName:'Success VLCM', replyTo:'' });
+  const [notifications, setNotifications] = useState({ newLeadEmails:[], dailySummary:false, dailySummaryEmails:[], appointmentReminders:true });
+  const [calendarIds, setCalendarIds] = useState({}); // { centerName: calendarId }
+  const [crmConfig, setCrmConfig] = useState({ leadSources:[], stages:[], statuses:[] });
+  const [newNotifEmail, setNewNotifEmail] = useState('');
+  const [newDailySumEmail, setNewDailySumEmail] = useState('');
+  const [newLeadSource, setNewLeadSource] = useState('');
+  const [savingSection, setSavingSection] = useState('');
+
   useEffect(() => {
     db.collection('settings').doc('admins').get().then(doc => {
       if (!doc.exists) {
@@ -486,7 +496,11 @@ function AdminPage({ user }) {
     if (access !== 'granted') return;
     const u1 = db.collection('settings').doc('email_templates').onSnapshot(snap => setTemplates(snap.exists ? snap.data().list||[] : []));
     const u2 = db.collection('settings').doc('centers').onSnapshot(snap => setCenters(snap.exists ? snap.data().list||[] : []));
-    return () => { u1(); u2(); };
+    const u3 = db.collection('settings').doc('email_config').onSnapshot(snap => { if(snap.exists) setEmailConfig(d=>({...d,...snap.data()})); });
+    const u4 = db.collection('settings').doc('notifications').onSnapshot(snap => { if(snap.exists) setNotifications(d=>({...d,...snap.data()})); });
+    const u5 = db.collection('settings').doc('calendars').onSnapshot(snap => { if(snap.exists) setCalendarIds(snap.data().centerCalendars||{}); });
+    const u6 = db.collection('settings').doc('crm_config').onSnapshot(snap => { if(snap.exists) setCrmConfig(d=>({...d,...snap.data()})); });
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
   }, [access]);
 
   async function saveTemplates(list) { await db.collection('settings').doc('email_templates').set({ list }); }
@@ -503,21 +517,45 @@ function AdminPage({ user }) {
     await db.collection('settings').doc('admins').set({ emails: updated });
     setAdminEmails(updated);
   }
+  async function saveEmailConfig() {
+    setSavingSection('email_config');
+    await db.collection('settings').doc('email_config').set(emailConfig);
+    setSavingSection('');
+  }
+  async function saveNotifications(updated) {
+    await db.collection('settings').doc('notifications').set(updated);
+  }
+  async function saveCalendars(updated) {
+    await db.collection('settings').doc('calendars').set({ centerCalendars: updated });
+  }
+  async function saveCrmConfig(updated) {
+    await db.collection('settings').doc('crm_config').set(updated);
+  }
 
   if (access === 'checking') return <div className="flex items-center justify-center h-64 text-gray-400">Checking access…</div>;
   if (access === 'denied') return (
     <div className="flex items-center justify-center h-64 text-center">
-      <div className="text-4xl mb-3">🔒</div>
+      <div><div className="text-4xl mb-3">🔒</div>
       <div className="font-bold text-gray-700 mb-1">Access Restricted</div>
-      <div className="text-sm text-gray-400">This page is for administrators only.</div>
+      <div className="text-sm text-gray-400">This page is for administrators only.</div></div>
     </div>
   );
 
-  const NAV = [
-    { key:'templates', icon:'📧', label:'Email Templates' },
-    { key:'centers',   icon:'📍', label:'Center Information' },
-    { key:'reports',   icon:'📊', label:'Pull Reports' },
-    { key:'admins',    icon:'👤', label:'Admin Access' },
+  const NAV_GROUPS = [
+    { label:'COMMUNICATION', items:[
+      { key:'templates',    icon:'📧', label:'Email Templates' },
+      { key:'email_config', icon:'✉️', label:'Email Settings' },
+    ]},
+    { label:'CENTERS & SCHEDULING', items:[
+      { key:'centers',   icon:'📍', label:'Center Information' },
+      { key:'calendars', icon:'📅', label:'Calendars' },
+    ]},
+    { label:'SYSTEM', items:[
+      { key:'notifications', icon:'🔔', label:'Notifications' },
+      { key:'crm_settings',  icon:'⚙️', label:'CRM Settings' },
+      { key:'reports',       icon:'📊', label:'Pull Reports' },
+      { key:'admins',        icon:'👤', label:'Admin Access' },
+    ]},
   ];
 
   const PanelHeader = ({title, desc, action}) => (
@@ -530,22 +568,36 @@ function AdminPage({ user }) {
     </div>
   );
 
+  const InfoBox = ({icon, children}) => (
+    <div className="flex gap-3 bg-blue-50 border border-blue-100 rounded-xl p-4 mb-6 text-sm text-blue-700">
+      <span className="text-lg flex-shrink-0">{icon}</span>
+      <div>{children}</div>
+    </div>
+  );
+
   return (
     <div className="flex fade-in" style={{minHeight:'calc(100vh - 56px)'}}>
 
       {/* Left sidebar */}
-      <div className="w-56 flex-shrink-0 border-r border-gray-100 bg-white flex flex-col" style={{minHeight:'calc(100vh - 56px)'}}>
-        <div className="px-4 pt-6 pb-3">
+      <div className="w-60 flex-shrink-0 border-r border-gray-100 bg-white flex flex-col" style={{minHeight:'calc(100vh - 56px)'}}>
+        <div className="px-4 pt-6 pb-2">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400 px-2">Admin Settings</p>
         </div>
-        <nav className="flex-1 px-3 space-y-0.5">
-          {NAV.map(({key, icon, label}) => (
-            <button key={key} onClick={() => setActiveSection(key)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition text-left ${activeSection===key ? 'text-white' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'}`}
-              style={activeSection===key ? {background:'#3b4f5f'} : {}}>
-              <span className="text-base">{icon}</span>
-              {label}
-            </button>
+        <nav className="flex-1 px-3 py-2">
+          {NAV_GROUPS.map(({label, items}) => (
+            <div key={label} className="mb-4">
+              <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider px-3 mb-1">{label}</p>
+              <div className="space-y-0.5">
+                {items.map(({key, icon, label:itemLabel}) => (
+                  <button key={key} onClick={() => setActiveSection(key)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition text-left ${activeSection===key ? 'text-white' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'}`}
+                    style={activeSection===key ? {background:'#3b4f5f'} : {}}>
+                    <span className="text-base">{icon}</span>
+                    {itemLabel}
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
       </div>
@@ -618,6 +670,36 @@ function AdminPage({ user }) {
           </div>
         )}
 
+        {/* EMAIL SETTINGS */}
+        {activeSection === 'email_config' && (
+          <div className="max-w-2xl">
+            <PanelHeader title="Email Settings" desc="Configure how outgoing emails appear to students and guardians." />
+            <InfoBox icon="ℹ️">
+              Emails are sent using the Google account of whichever staff member is logged in. The name below appears as the display name on outgoing emails. A reply-to address lets replies go to a shared inbox instead of the sender's personal account.
+            </InfoBox>
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-5">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Sender Display Name</label>
+                <input className={FIELD_CLS} value={emailConfig.senderName} onChange={e=>setEmailConfig(c=>({...c,senderName:e.target.value}))} placeholder="e.g. Success VLCM" />
+                <p className="text-xs text-gray-400 mt-1">Shown as the "From" name on emails (e.g. "Success VLCM via staff@gmail.com")</p>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Reply-To Address <span className="font-normal">(optional)</span></label>
+                <input className={FIELD_CLS} value={emailConfig.replyTo} onChange={e=>setEmailConfig(c=>({...c,replyTo:e.target.value}))} placeholder="e.g. enrollment@successmichigan.org" />
+                <p className="text-xs text-gray-400 mt-1">When students reply to emails, replies go here instead of the sender's personal inbox</p>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Organization Name</label>
+                <input className={FIELD_CLS} value={emailConfig.orgName||''} onChange={e=>setEmailConfig(c=>({...c,orgName:e.target.value}))} placeholder="e.g. Success Virtual Learning Centers of Michigan" />
+              </div>
+              <button onClick={saveEmailConfig} disabled={savingSection==='email_config'}
+                className="text-white px-6 py-2 rounded-xl text-sm font-semibold hover:opacity-90 disabled:opacity-50" style={{background:'#5ba300'}}>
+                {savingSection==='email_config' ? 'Saving…' : 'Save Email Settings'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* CENTER INFORMATION */}
         {activeSection === 'centers' && (
           <div>
@@ -673,6 +755,219 @@ function AdminPage({ user }) {
                   ))}
                 </div>
             }
+          </div>
+        )}
+
+        {/* CALENDARS */}
+        {activeSection === 'calendars' && (
+          <div className="max-w-2xl">
+            <PanelHeader title="Calendars" desc="Link a Google Calendar to each learning center to sync appointments and track no-shows." />
+            <InfoBox icon="📅">
+              <strong>How to find your Google Calendar ID:</strong> Open Google Calendar → click the three dots next to the calendar name → Settings → scroll down to "Integrate calendar" → copy the Calendar ID. It looks like <em>abc123@group.calendar.google.com</em> or your email address for your primary calendar.
+            </InfoBox>
+            {centers.length === 0 ? (
+              <div className="text-center py-12 text-gray-300 bg-white rounded-2xl border border-gray-100">
+                <div className="text-4xl mb-2">📍</div>
+                <div className="text-sm">Add centers first under Center Information, then connect their calendars here.</div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {centers.map((c) => {
+                  const calId = calendarIds[c.name] || '';
+                  const connected = calId.includes('@');
+                  return (
+                    <div key={c.name} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="font-bold text-gray-800">{c.name}</div>
+                        <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${connected ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                          {connected ? '● Connected' : '○ Not connected'}
+                        </span>
+                      </div>
+                      <div className="flex gap-2">
+                        <input className={FIELD_CLS} placeholder="Paste Google Calendar ID…" value={calId}
+                          onChange={e => setCalendarIds(prev=>({...prev,[c.name]:e.target.value}))} />
+                        <button onClick={async()=>{
+                          await saveCalendars({...calendarIds,[c.name]:calId});
+                        }} className="text-white px-4 py-2 rounded-xl text-sm font-semibold hover:opacity-90 flex-shrink-0" style={{background:'#5ba300'}}>
+                          Save
+                        </button>
+                        {connected && (
+                          <button onClick={async()=>{
+                            const updated = {...calendarIds}; delete updated[c.name];
+                            setCalendarIds(updated); await saveCalendars(updated);
+                          }} className="text-xs text-red-400 hover:text-red-600 px-2 font-semibold flex-shrink-0">Disconnect</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* NOTIFICATIONS */}
+        {activeSection === 'notifications' && (
+          <div className="max-w-2xl">
+            <PanelHeader title="Notifications" desc="Control who gets notified and when." />
+
+            {/* New lead alerts */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-4">
+              <h3 className="font-bold text-gray-800 mb-1">New Lead Alerts</h3>
+              <p className="text-sm text-gray-400 mb-4">Send an email notification whenever a new inquiry is created.</p>
+              <div className="flex gap-2 mb-3">
+                <input className={FIELD_CLS} placeholder="Add email address…" value={newNotifEmail}
+                  onChange={e=>setNewNotifEmail(e.target.value)}
+                  onKeyDown={async e=>{
+                    if(e.key!=='Enter'||!newNotifEmail.trim()) return;
+                    const updated = {...notifications, newLeadEmails:[...(notifications.newLeadEmails||[]),newNotifEmail.trim()]};
+                    setNotifications(updated); await saveNotifications(updated); setNewNotifEmail('');
+                  }} />
+                <button onClick={async()=>{
+                  if(!newNotifEmail.trim()) return;
+                  const updated = {...notifications, newLeadEmails:[...(notifications.newLeadEmails||[]),newNotifEmail.trim()]};
+                  setNotifications(updated); await saveNotifications(updated); setNewNotifEmail('');
+                }} className="text-white px-4 py-2 rounded-xl text-sm font-semibold hover:opacity-90 flex-shrink-0" style={{background:'#5ba300'}}>Add</button>
+              </div>
+              {(notifications.newLeadEmails||[]).length === 0
+                ? <p className="text-xs text-gray-300">No recipients yet — add email addresses above.</p>
+                : <div className="space-y-1.5">
+                    {(notifications.newLeadEmails||[]).map((e,i)=>(
+                      <div key={i} className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
+                        <span className="text-sm text-gray-700">{e}</span>
+                        <button onClick={async()=>{
+                          const updated={...notifications,newLeadEmails:(notifications.newLeadEmails||[]).filter((_,j)=>j!==i)};
+                          setNotifications(updated); await saveNotifications(updated);
+                        }} className="text-xs text-red-400 hover:text-red-600 font-semibold">Remove</button>
+                      </div>
+                    ))}
+                  </div>
+              }
+            </div>
+
+            {/* Daily summary */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-4">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="font-bold text-gray-800">Daily Summary Email</h3>
+                <button onClick={async()=>{
+                  const updated={...notifications,dailySummary:!notifications.dailySummary};
+                  setNotifications(updated); await saveNotifications(updated);
+                }} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${notifications.dailySummary ? 'bg-green-500' : 'bg-gray-200'}`}
+                  style={notifications.dailySummary?{background:'#5ba300'}:{}}>
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${notifications.dailySummary ? 'translate-x-6' : 'translate-x-1'}`}/>
+                </button>
+              </div>
+              <p className="text-sm text-gray-400 mb-4">Send a morning summary of upcoming appointments and pending follow-ups.</p>
+              {notifications.dailySummary && (
+                <>
+                  <div className="flex gap-2 mb-3">
+                    <input className={FIELD_CLS} placeholder="Add recipient email…" value={newDailySumEmail}
+                      onChange={e=>setNewDailySumEmail(e.target.value)}
+                      onKeyDown={async e=>{
+                        if(e.key!=='Enter'||!newDailySumEmail.trim()) return;
+                        const updated={...notifications,dailySummaryEmails:[...(notifications.dailySummaryEmails||[]),newDailySumEmail.trim()]};
+                        setNotifications(updated); await saveNotifications(updated); setNewDailySumEmail('');
+                      }} />
+                    <button onClick={async()=>{
+                      if(!newDailySumEmail.trim()) return;
+                      const updated={...notifications,dailySummaryEmails:[...(notifications.dailySummaryEmails||[]),newDailySumEmail.trim()]};
+                      setNotifications(updated); await saveNotifications(updated); setNewDailySumEmail('');
+                    }} className="text-white px-4 py-2 rounded-xl text-sm font-semibold hover:opacity-90 flex-shrink-0" style={{background:'#5ba300'}}>Add</button>
+                  </div>
+                  {(notifications.dailySummaryEmails||[]).map((e,i)=>(
+                    <div key={i} className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2 mb-1.5">
+                      <span className="text-sm text-gray-700">{e}</span>
+                      <button onClick={async()=>{
+                        const updated={...notifications,dailySummaryEmails:(notifications.dailySummaryEmails||[]).filter((_,j)=>j!==i)};
+                        setNotifications(updated); await saveNotifications(updated);
+                      }} className="text-xs text-red-400 hover:text-red-600 font-semibold">Remove</button>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+
+            {/* Appointment reminders */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-gray-800">Appointment Reminders</h3>
+                  <p className="text-sm text-gray-400 mt-0.5">Log a reminder in the activity feed 24 hours before a scheduled enrollment appointment.</p>
+                </div>
+                <button onClick={async()=>{
+                  const updated={...notifications,appointmentReminders:!notifications.appointmentReminders};
+                  setNotifications(updated); await saveNotifications(updated);
+                }} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0`}
+                  style={notifications.appointmentReminders?{background:'#5ba300'}:{background:'#e5e7eb'}}>
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${notifications.appointmentReminders ? 'translate-x-6' : 'translate-x-1'}`}/>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CRM SETTINGS */}
+        {activeSection === 'crm_settings' && (
+          <div className="max-w-2xl">
+            <PanelHeader title="CRM Settings" desc="Customize the dropdown options used throughout the CRM." />
+
+            {/* Lead Sources */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-4">
+              <h3 className="font-bold text-gray-800 mb-1">Lead Sources</h3>
+              <p className="text-sm text-gray-400 mb-4">Where inquiries come from. These appear in the student profile header.</p>
+              <div className="flex gap-2 mb-3">
+                <input className={FIELD_CLS} placeholder="Add lead source…" value={newLeadSource}
+                  onChange={e=>setNewLeadSource(e.target.value)}
+                  onKeyDown={async e=>{
+                    if(e.key!=='Enter'||!newLeadSource.trim()) return;
+                    const sources = [...(crmConfig.leadSources||LEAD_SOURCES), newLeadSource.trim()];
+                    const updated={...crmConfig,leadSources:sources};
+                    setCrmConfig(updated); await saveCrmConfig(updated); setNewLeadSource('');
+                  }} />
+                <button onClick={async()=>{
+                  if(!newLeadSource.trim()) return;
+                  const sources = [...(crmConfig.leadSources.length ? crmConfig.leadSources : LEAD_SOURCES), newLeadSource.trim()];
+                  const updated={...crmConfig,leadSources:sources};
+                  setCrmConfig(updated); await saveCrmConfig(updated); setNewLeadSource('');
+                }} className="text-white px-4 py-2 rounded-xl text-sm font-semibold hover:opacity-90 flex-shrink-0" style={{background:'#5ba300'}}>Add</button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {(crmConfig.leadSources.length ? crmConfig.leadSources : LEAD_SOURCES).map((s,i)=>(
+                  <div key={i} className="flex items-center gap-1.5 bg-gray-100 rounded-lg px-3 py-1.5 text-sm text-gray-700">
+                    {s}
+                    <button onClick={async()=>{
+                      const sources=(crmConfig.leadSources.length?crmConfig.leadSources:LEAD_SOURCES).filter((_,j)=>j!==i);
+                      const updated={...crmConfig,leadSources:sources};
+                      setCrmConfig(updated); await saveCrmConfig(updated);
+                    }} className="text-gray-400 hover:text-red-500 ml-1 font-bold text-xs">✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Enrollment Stages */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-4">
+              <h3 className="font-bold text-gray-800 mb-1">Enrollment Stages</h3>
+              <p className="text-sm text-gray-400 mb-3">Track where a student is in the enrollment pipeline.</p>
+              <div className="flex flex-wrap gap-2">
+                {['New Inquiry','Contacted','Appointment Set','Enrolled','Not Qualified','Lost'].map((s,i)=>(
+                  <span key={i} className="bg-blue-50 text-blue-700 rounded-lg px-3 py-1.5 text-sm font-medium">{s}</span>
+                ))}
+              </div>
+              <p className="text-xs text-gray-300 mt-3">Custom stage editing coming soon.</p>
+            </div>
+
+            {/* Appointment Results */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+              <h3 className="font-bold text-gray-800 mb-1">Appointment Results</h3>
+              <p className="text-sm text-gray-400 mb-3">Outcomes that can be recorded after an enrollment appointment.</p>
+              <div className="flex flex-wrap gap-2">
+                {APPOINTMENT_RESULTS.map((s,i)=>(
+                  <span key={i} className="bg-purple-50 text-purple-700 rounded-lg px-3 py-1.5 text-sm font-medium">{s}</span>
+                ))}
+              </div>
+              <p className="text-xs text-gray-300 mt-3">Custom result editing coming soon.</p>
+            </div>
           </div>
         )}
 
