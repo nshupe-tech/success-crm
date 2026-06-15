@@ -94,12 +94,22 @@ const STATUS_COLORS = {
 };
 
 // ─── FIREBASE ────────────────────────────────────────────────────────────────
-let db = null, auth = null, fbApp = null;
-function initFirebase(config) {
-  try { if (fbApp) { try { firebase.app().delete(); } catch(e){} }
-    fbApp = firebase.initializeApp(config); db = firebase.firestore(); auth = firebase.auth(); return true;
-  } catch(e) { console.error(e); return false; }
-}
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAR-h4SjiNILJqFcRTbjJf5bA_nO06fvRc",
+  authDomain: "success-lead-crm.firebaseapp.com",
+  projectId: "success-lead-crm",
+  storageBucket: "success-lead-crm.firebasestorage.app",
+  messagingSenderId: "701630272841",
+  appId: "1:701630272841:web:c03cc6ac0d690599eef698",
+};
+let db = null, auth = null;
+(function() {
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+    auth = firebase.auth();
+  } catch(e) { console.error('Firebase init error:', e); }
+})();
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function fmtDate(ts) {
@@ -1079,27 +1089,12 @@ function MainApp({ user }) {
 
 // ─── ROOT ────────────────────────────────────────────────────────────────────
 function Root() {
-  const [fbReady, setFbReady] = useState(false);
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   useEffect(()=>{
-    const saved = localStorage.getItem('success_crm_fb_config');
-    if(saved) {
-      try {
-        if(initFirebase(JSON.parse(saved))) {
-          setFbReady(true);
-          const unsub = auth.onAuthStateChanged(u=>{ setUser(u); setAuthLoading(false); });
-          return ()=>unsub();
-        }
-      } catch(e){}
-    }
-    setAuthLoading(false);
+    const unsub = auth.onAuthStateChanged(u=>{ setUser(u); setAuthLoading(false); });
+    return ()=>unsub();
   },[]);
-  function onSetupDone() {
-    setFbReady(true); setAuthLoading(true);
-    auth.onAuthStateChanged(u=>{ setUser(u); setAuthLoading(false); });
-  }
-  if(!fbReady) return <SetupPage onDone={onSetupDone} />;
   if(authLoading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>;
   if(!user) return <LoginPage />;
   return <MainApp user={user} />;
