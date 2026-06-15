@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Success CRM</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#f0fdf4', 100:'#dcfce7', 500:'#22c55e', 600:'#16a34a', 700:'#15803d', 800:'#166534', 900:'#14532d' },
+            navy: { 700:'#1e3a5f', 800:'#162d47', 900:'#0f1f30' }
+          }
+        }
+      }
+    }
+  </script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Firebase compat (works without build step) -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <style>
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .fade-in { animation: fadeIn 0.2s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .tab-active { border-bottom: 2px solid #16a34a; color: #16a34a; font-weight: 600; }
+    .status-badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 500; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── CONSTANTS ───────────────────────────────────────────────────────────────
+const LEAD_STATUSES = [
+  'New Lead','1st Contact Attempt','2nd Contact Attempt','3rd Contact Attempt',
+  'Qualified','Appointment Scheduled','Appointment Completed - Enrolled',
+  'Appointment Completed - Not Qualified','Sent to Student Services','Unqualified'
+];
+const LEARNING_CENTERS = ['Monroe','Flint','Grand Rapids','Lansing','Detroit','Kalamazoo','Other'];
+const APPOINTMENT_RESULTS = ['','Student Not Qualified','Enrolled','Needs Follow Up','No Show','Rescheduled','Cancelled'];
+const DOC_TYPES = ['State ID / Photo ID','Birth Certificate','Transcript','IEP / 504 Plan','Enrollment Agreement','Proof of Residency','Other'];
+const ACTIVITY_ICONS = { note:'📝', call:'📞', text:'💬', email:'📧' };
+const STATUS_COLORS = {
+  'New Lead':'bg-blue-100 text-blue-700',
+  '1st Contact Attempt':'bg-yellow-100 text-yellow-700',
+  '2nd Contact Attempt':'bg-yellow-100 text-yellow-700',
+  '3rd Contact Attempt':'bg-orange-100 text-orange-700',
+  'Qualified':'bg-green-100 text-green-700',
+  'Appointment Scheduled':'bg-purple-100 text-purple-700',
+  'Appointment Completed - Enrolled':'bg-green-200 text-green-800',
+  'Appointment Completed - Not Qualified':'bg-red-100 text-red-700',
+  'Sent to Student Services':'bg-teal-100 text-teal-700',
+  'Unqualified':'bg-gray-100 text-gray-600',
+};
+
+// ─── FIREBASE INIT ────────────────────────────────────────────────────────────
+let db = null, auth = null, fbApp = null;
+
+function initFirebase(config) {
+  try {
+    if (fbApp) { firebase.app().delete(); }
+    fbApp = firebase.initializeApp(config);
+    db = firebase.firestore();
+    auth = firebase.auth();
+    return true;
+  } catch(e) { console.error(e); return false; }
+}
+
+// ─── SETUP PAGE ───────────────────────────────────────────────────────────────
+function SetupPage({ onDone }) {
+  const [config, setConfig] = useState({
+    apiKey:'', authDomain:'', projectId:'', storageBucket:'', messagingSenderId:'', appId:''
+  });
+  const [error, setError] = useState('');
+
+  function handleSave() {
+    if (!config.apiKey || !config.projectId) { setError('API Key and Project ID are required.'); return; }
+    const ok = initFirebase(config);
+    if (ok) {
+      localStorage.setItem('success_crm_fb_config', JSON.stringify(config));
+      onDone();
+    } else {
+      setError('Could not connect to Firebase. Check your config and try again.');
+    }
+  }
+
+  const fields = [
+    { key:'apiKey', label:'API Key' },
+    { key:'authDomain', label:'Auth Domain' },
+    { key:'projectId', label:'Project ID' },
+    { key:'storageBucket', label:'Storage Bucket' },
+    { key:'messagingSenderId', label:'Messaging Sender ID' },
+    { key:'appId', label:'App ID' },
+  ];
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-lg max-w-lg w-full p-8">
+        <div className="text-center mb-6">
+          <div className="text-4xl mb-2">🎓</div>
+          <h1 className="text-2xl font-bold text-navy-900">Success CRM Setup</h1>
+          <p className="text-gray-500 mt-1 text-sm">Enter your Firebase project credentials to get started.<br/>
+            <a href="https://console.firebase.google.com" target="_blank" className="text-green-600 underline">Create a Firebase project →</a>
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          {fields.map(f => (
+            <div key={f.key}>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">{f.label}</label>
+              <input
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                value={config[f.key]}
+                onChange={e => setConfig(c => ({ ...c, [f.key]: e.target.value }))}
+                placeholder={f.key === 'authDomain' ? 'your-project.firebaseapp.com' : ''}
+              />
+            </div>
+          ))}
+        </div>
+
+        {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
+
+        <button
+          onClick={handleSave}
+          className="mt-6 w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2.5 rounded-lg transition"
+        >
+          Connect to Firebase
+        </button>
+
+        <div className="mt-6 bg-blue-50 rounded-lg p-4 text-xs text-blue-700">
+          <p className="font-semibold mb-1">How to find your Firebase config:</p>
+          <ol className="list-decimal list-inside space-y-1">
+            <li>Go to <strong>console.firebase.google.com</strong></li>
+            <li>Create or select your project</li>
+            <li>Click the gear icon → <strong>Project Settings</strong></li>
+            <li>Under "Your apps", click <strong>Add app → Web (&lt;/&gt;)</strong></li>
+            <li>Copy the <code>firebaseConfig</code> values above</li>
+            <li>Enable <strong>Firestore Database</strong> and <strong>Authentication → Google</strong></li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── LOGIN PAGE ───────────────────────────────────────────────────────────────
+function LoginPage() {
+  const [error, setError] = useState('');
+  async function signIn() {
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      await auth.signInWithPopup(provider);
+    } catch(e) { setError('Sign-in failed: ' + e.message); }
+  }
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="bg-white rounded-2xl shadow-lg p-10 text-center max-w-sm w-full">
+        <div className="text-4xl mb-3">🎓</div>
+        <h1 className="text-2xl font-bold text-navy-900 mb-1">Success CRM</h1>
+        <p className="text-gray-500 text-sm mb-6">Sign in to access your leads</p>
+        <button
+          onClick={signIn}
+          className="w-full flex items-center justify-center gap-3 border border-gray-200 rounded-lg py-2.5 hover:bg-gray-50 transition font-medium"
+        >
+          <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#4285F4" d="M44.5 20H24v8.5h11.8C34.2 33.8 29.6 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 6 1.1 8.1 3l6.4-6.4C34.8 5 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c12 0 21-8.4 21-21 0-1.4-.1-2.7-.5-4z"/><path fill="#34A853" d="M6.3 14.7l7 5.1C15.1 16.1 19.2 13 24 13c3.1 0 6 1.1 8.1 3l6.4-6.4C34.8 5 29.6 3 24 3 16.4 3 9.8 7.9 6.3 14.7z"/><path fill="#FBBC05" d="M24 45c5.5 0 10.5-1.9 14.4-5l-6.7-5.5C29.6 36 26.9 37 24 37c-5.6 0-10.2-3.2-11.8-7.8l-6.9 5.3C9.7 41.1 16.4 45 24 45z"/><path fill="#EA4335" d="M44.5 20H24v8.5h11.8c-1 2.8-2.9 5-5.3 6.5l6.7 5.5C41 37.2 45 31.2 45 24c0-1.4-.1-2.7-.5-4z"/></svg>
+          Sign in with Google
+        </button>
+        {error && <p className="text-red-500 text-xs mt-3">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+// ─── UTILITIES ────────────────────────────────────────────────────────────────
+function fmtDate(ts) {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+}
+function fmtDateTime(ts) {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
+}
+function timeAgo(ts) {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff/60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins/60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs/24);
+  if (days < 7) return `${days}d ago`;
+  return fmtDate(ts);
+}
+function calcAge(dob) {
+  if (!dob) return '';
+  const birth = new Date(dob), now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  if (now < new Date(now.getFullYear(), birth.getMonth(), birth.getDate())) age--;
+  return age;
+}
+
+// ─── MODAL ────────────────────────────────────────────────────────────────────
+function Modal({ title, onClose, children }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 fade-in" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-bold text-lg">{title}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── STATUS BADGE ─────────────────────────────────────────────────────────────
+function StatusBadge({ status }) {
+  const cls = STATUS_COLORS[status] || 'bg-gray-100 text-gray-600';
+  return <span className={`status-badge ${cls}`}>{status || 'No Status'}</span>;
+}
+
+// ─── LEADS LIST PAGE ──────────────────────────────────────────────────────────
+function LeadsListPage({ user, onSelect, onAddNew }) {
+  const [leads, setLeads] = useState([]);
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsub = db.collection('students')
+      .orderBy('created_at', 'desc')
+      .onSnapshot(snap => {
+        setLeads(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      }, err => { console.error(err); setLoading(false); });
+    return () => unsub();
+  }, []);
+
+  const filtered = leads.filter(l => {
+    const name = `${l.student_first_name||''} ${l.student_last_name||''}`.toLowerCase();
+    const contact = `${l.contact_first_name||''} ${l.contact_last_name||''}`.toLowerCase();
+    const phone = (l.contact_phone || '').replace(/\D/g,'');
+    const searchLower = search.toLowerCase();
+    const matchSearch = !search || name.includes(searchLower) || contact.includes(searchLower) || phone.includes(search.replace(/\D/g,''));
+    const matchStatus = !filterStatus || l.lead_status === filterStatus;
+    return matchSearch && matchStatus;
+  });
+
+  return (
+    <div className="fade-in">
+      {/* Top bar */}
+      <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-wrap gap-3 items-center">
+        <input
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-green-400"
+          placeholder="Search by name or phone..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <select
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+          value={filterStatus}
+          onChange={e => setFilterStatus(e.target.value)}
+        >
+          <option value="">All Statuses</option>
+          {LEAD_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <div className="ml-auto">
+          <button
+            onClick={onAddNew}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition"
+          >
+            + Add Lead
+          </button>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="p-6">
+        {loading ? (
+          <div className="text-center py-20 text-gray-400">Loading leads...</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-20 text-gray-400">
+            {search || filterStatus ? 'No leads match your search.' : 'No leads yet. Click "+ Add Lead" to get started.'}
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100">
+                  <th className="text-left px-4 py-3 text-gray-500 font-semibold">Student</th>
+                  <th className="text-left px-4 py-3 text-gray-500 font-semibold">Phone</th>
+                  <th className="text-left px-4 py-3 text-gray-500 font-semibold">Status</th>
+                  <th className="text-left px-4 py-3 text-gray-500 font-semibold">Learning Center</th>
+                  <th className="text-left px-4 py-3 text-gray-500 font-semibold">Added</th>
+                  <th className="text-left px-4 py-3 text-gray-500 font-semibold">Owner</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((l, i) => (
+                  <tr
+                    key={l.id}
+                    onClick={() => onSelect(l.id)}
+                    className={`border-b border-gray-50 cursor-pointer hover:bg-green-50 transition ${i % 2 === 0 ? '' : 'bg-gray-50/50'}`}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="font-semibold text-navy-800">
+                        {l.student_first_name} {l.student_last_name}
+                      </div>
+                      {(l.contact_first_name || l.contact_last_name) && l.i_am_a !== 'Adult Student' && (
+                        <div className="text-xs text-gray-400">Contact: {l.contact_first_name} {l.contact_last_name}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">{l.contact_phone}</td>
+                    <td className="px-4 py-3"><StatusBadge status={l.lead_status} /></td>
+                    <td className="px-4 py-3 text-gray-600">{l.learning_center || '—'}</td>
+                    <td className="px-4 py-3 text-gray-500">{fmtDate(l.created_at)}</td>
+                    <td className="px-4 py-3 text-gray-600">{l.lead_owner || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">
+              {filtered.length} lead{filtered.length !== 1 ? 's' : ''}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── ACTIVITY FEED ────────────────────────────────────────────────────────────
+function ActivityFeed({ studentId, user }) {
+  const [activities, setActivities] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [actType, setActType] = useState('note');
+  const [actContent, setActContent] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const unsub = db.collection('students').doc(studentId)
+      .collection('activities')
+      .orderBy('created_at', 'desc')
+      .onSnapshot(snap => {
+        setActivities(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      });
+    return () => unsub();
+  }, [studentId]);
+
+  async function addActivity() {
+    if (!actContent.trim()) return;
+    setSaving(true);
+    try {
+      await db.collection('students').doc(studentId).collection('activities').add({
+        type: actType,
+        content: actContent.trim(),
+        created_by: user.displayName || user.email,
+        created_at: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      // Update student's updated_at
+      await db.collection('students').doc(studentId).update({
+        updated_at: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      setActContent('');
+      setShowAdd(false);
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div>
+      {/* Add activity button */}
+      {!showAdd ? (
+        <div className="flex gap-2 mb-4 flex-wrap">
+          {Object.entries(ACTIVITY_ICONS).map(([t, icon]) => (
+            <button
+              key={t}
+              onClick={() => { setActType(t); setShowAdd(true); }}
+              className="flex items-center gap-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm hover:bg-gray-50 transition capitalize"
+            >
+              {icon} Log {t}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="bg-gray-50 rounded-xl p-4 mb-4 border border-gray-200">
+          <div className="flex gap-2 mb-3">
+            {Object.entries(ACTIVITY_ICONS).map(([t, icon]) => (
+              <button
+                key={t}
+                onClick={() => setActType(t)}
+                className={`flex items-center gap-1 px-3 py-1 rounded-lg text-sm transition capitalize ${actType === t ? 'bg-green-600 text-white' : 'border border-gray-200 hover:bg-gray-100'}`}
+              >
+                {icon} {t}
+              </button>
+            ))}
+          </div>
+          <textarea
+            className="w-full border border-gray-200 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 min-h-[80px]"
+            placeholder={`Add a ${actType} note...`}
+            value={actContent}
+            onChange={e => setActContent(e.target.value)}
+            autoFocus
+          />
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={addActivity}
+              disabled={saving || !actContent.trim()}
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold disabled:opacity-50 transition"
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+            <button onClick={() => { setShowAdd(false); setActContent(''); }} className="text-gray-500 hover:text-gray-700 text-sm px-2">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Feed */}
+      {loading ? (
+        <div className="text-center py-10 text-gray-400 text-sm">Loading activity...</div>
+      ) : activities.length === 0 ? (
+        <div className="text-center py-10 text-gray-400 text-sm">No activity logged yet. Use the buttons above to log a call, note, or text.</div>
+      ) : (
+        <div className="space-y-3">
+          {activities.map(a => (
+            <div key={a.id} className="flex gap-3 bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+              <div className="text-xl mt-0.5">{ACTIVITY_ICONS[a.type] || '📝'}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-gray-800 whitespace-pre-wrap">{a.content}</div>
+                <div className="text-xs text-gray-400 mt-1 flex gap-2">
+                  <span className="capitalize font-medium text-gray-500">{a.type}</span>
+                  <span>·</span>
+                  <span>{a.created_by}</span>
+                  <span>·</span>
+                  <span title={fmtDateTime(a.created_at)}>{timeAgo(a.created_at)}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── DETAILS FORM ─────────────────────────────────────────────────────────────
+function DetailsForm({ student, studentId, user }) {
+  const [form, setForm] = useState({ ...student });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  function set(key, val) { setForm(f => ({ ...f, [key]: val })); }
+
+  async function save() {
+    setSaving(true);
+    try {
+      await db.collection('students').doc(studentId).update({
+        ...form,
+        student_age: form.student_dob ? calcAge(form.student_dob) : form.student_age,
+        updated_at: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally { setSaving(false); }
+  }
+
+  const Section = ({ title, children }) => (
+    <div className="mb-6">
+      <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 border-b border-gray-100 pb-2">{title}</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>
+    </div>
+  );
+  const Field = ({ label, children }) => (
+    <div>
+      <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
+      {children}
+    </div>
+  );
+  const Input = ({ k, type='text', ...props }) => (
+    <input type={type} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" value={form[k]||''} onChange={e => set(k, e.target.value)} {...props} />
+  );
+  const Select = ({ k, options, ...props }) => (
+    <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" value={form[k]||''} onChange={e => set(k, e.target.value)} {...props}>
+      <option value="">None Selected</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+
+  return (
+    <div>
+      <Section title="Student Information">
+        <Field label="First Name"><Input k="student_first_name" /></Field>
+        <Field label="Last Name"><Input k="student_last_name" /></Field>
+        <Field label="Date of Birth">
+          <Input k="student_dob" type="date" onChange={e => { set('student_dob', e.target.value); set('student_age', calcAge(e.target.value)); }} />
+        </Field>
+        <Field label="Age">
+          <input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50" value={form.student_age || (form.student_dob ? calcAge(form.student_dob) : '')} readOnly />
+        </Field>
+        <Field label="Learning Center"><Select k="learning_center" options={LEARNING_CENTERS} /></Field>
+        <Field label="Last School Attended"><Input k="last_school_attended" /></Field>
+        <Field label="IEP / 504 Status">
+          <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" value={form.iep_504||''} onChange={e => set('iep_504', e.target.value)}>
+            <option value="">None Selected</option>
+            <option value="IEP">IEP</option>
+            <option value="504 Plan">504 Plan</option>
+            <option value="Neither">Neither</option>
+          </select>
+        </Field>
+        <Field label="Was Student Expelled from Last School?">
+          <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" value={form.expelled===true?'Yes':form.expelled===false?'No':''} onChange={e => set('expelled', e.target.value === 'Yes' ? true : e.target.value === 'No' ? false : '')}>
+            <option value="">None Selected</option>
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
+          </select>
+        </Field>
+        <Field label="Preferred Language">
+          <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" value={form.preferred_language||'English'} onChange={e => set('preferred_language', e.target.value)}>
+            <option value="English">English</option>
+            <option value="Spanish">Spanish</option>
+            <option value="Arabic">Arabic</option>
+            <option value="Other">Other</option>
+          </select>
+        </Field>
+        <Field label="I am a...">
+          <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" value={form.i_am_a||''} onChange={e => set('i_am_a', e.target.value)}>
+            <option value="">None Selected</option>
+            <option value="Parent/Guardian">Parent / Guardian</option>
+            <option value="Adult Student">Adult Student (18+)</option>
+            <option value="Other">Other</option>
+          </select>
+        </Field>
+      </Section>
+
+      <Section title="Contact Information">
+        <Field label="Contact First Name"><Input k="contact_first_name" /></Field>
+        <Field label="Contact Last Name"><Input k="contact_last_name" /></Field>
+        <Field label="Contact Phone"><Input k="contact_phone" type="tel" /></Field>
+        <Field label="Contact Email"><Input k="contact_email" type="email" /></Field>
+      </Section>
+
+      <Section title="Parent / Guardian Information">
+        <Field label="Guardian First Name"><Input k="guardian_first_name" /></Field>
+        <Field label="Guardian Last Name"><Input k="guardian_last_name" /></Field>
+        <Field label="Guardian Phone"><Input k="guardian_phone" type="tel" /></Field>
+      </Section>
+
+      <Section title="Lead Information">
+        <Field label="Lead Status"><Select k="lead_status" options={LEAD_STATUSES} /></Field>
+        <Field label="Lead Source"><Input k="lead_source" placeholder="e.g. Website, Referral, Social Media" /></Field>
+        <Field label="Lead Owner"><Input k="lead_owner" /></Field>
+      </Section>
+
+      <Section title="Enrollment">
+        <Field label="Appointment Date / Time"><Input k="enrollment_appointment_time" type="datetime-local" /></Field>
+        <Field label="Appointment Result"><Select k="enrollment_appointment_result" options={APPOINTMENT_RESULTS.filter(Boolean)} /></Field>
+        <Field label="Center Email Contact">
+          <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" value={form.center_email||''} onChange={e => set('center_email', e.target.value)}>
+            <option value="">None Selected</option>
+            {LEARNING_CENTERS.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </Field>
+        <Field label="Center Phone Number"><Input k="center_phone" type="tel" /></Field>
+      </Section>
+
+      <div className="flex items-center gap-3 pt-2">
+        <button
+          onClick={save}
+          disabled={saving}
+          className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-semibold text-sm disabled:opacity-50 transition"
+        >
+          {saving ? 'Saving...' : 'Save Changes'}
+        </button>
+        {saved && <span className="text-green-600 text-sm font-medium">✓ Saved!</span>}
+      </div>
+    </div>
+  );
+}
+
+// ─── DOCUMENTS TAB ────────────────────────────────────────────────────────────
+function DocumentsTab({ studentId, user }) {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ type: DOC_TYPES[0], filename: '', drive_url: '', notes: '' });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const unsub = db.collection('students').doc(studentId)
+      .collection('documents')
+      .orderBy('uploaded_at', 'desc')
+      .onSnapshot(snap => {
+        setDocs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      });
+    return () => unsub();
+  }, [studentId]);
+
+  async function addDoc() {
+    if (!form.drive_url.trim()) return;
+    setSaving(true);
+    try {
+      await db.collection('students').doc(studentId).collection('documents').add({
+        ...form,
+        uploaded_by: user.displayName || user.email,
+        uploaded_at: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      setForm({ type: DOC_TYPES[0], filename: '', drive_url: '', notes: '' });
+      setShowAdd(false);
+    } finally { setSaving(false); }
+  }
+
+  async function deleteDoc(docId) {
+    if (!confirm('Remove this document link?')) return;
+    await db.collection('students').doc(studentId).collection('documents').doc(docId).delete();
+  }
+
+  // Group by type
+  const grouped = DOC_TYPES.reduce((acc, t) => {
+    acc[t] = docs.filter(d => d.type === t);
+    return acc;
+  }, {});
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-gray-500">Documents are stored in Google Drive. Paste the shareable link here to keep everything connected.</p>
+        <button
+          onClick={() => setShowAdd(!showAdd)}
+          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ml-4"
+        >
+          + Add Document
+        </button>
+      </div>
+
+      {showAdd && (
+        <div className="bg-gray-50 rounded-xl p-4 mb-4 border border-gray-200">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Document Type</label>
+              <select
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                value={form.type}
+                onChange={e => setForm(f => ({ ...f, type: e.target.value }))}
+              >
+                {DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">File Name / Description</label>
+              <input
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                placeholder="e.g. John Smith State ID"
+                value={form.filename}
+                onChange={e => setForm(f => ({ ...f, filename: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="mb-3">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Google Drive Link *</label>
+            <input
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+              placeholder="https://drive.google.com/..."
+              value={form.drive_url}
+              onChange={e => setForm(f => ({ ...f, drive_url: e.target.value }))}
+            />
+          </div>
+          <div className="mb-3">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Notes (optional)</label>
+            <input
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+              placeholder="Any notes about this document"
+              value={form.notes}
+              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+            />
+          </div>
+          <div className="flex gap-2">
+            <button onClick={addDoc} disabled={saving || !form.drive_url.trim()} className="bg-green-600 text-white px-4 py-1.5 rounded-lg text-sm font-semibold disabled:opacity-50 transition hover:bg-green-700">
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+            <button onClick={() => setShowAdd(false)} className="text-gray-500 text-sm px-2">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-10 text-gray-400 text-sm">Loading documents...</div>
+      ) : docs.length === 0 ? (
+        <div className="text-center py-10 text-gray-400 text-sm">No documents added yet.</div>
+      ) : (
+        <div className="space-y-4">
+          {DOC_TYPES.map(type => {
+            const typeDocs = grouped[type] || [];
+            if (typeDocs.length === 0) return null;
+            return (
+              <div key={type}>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">{type}</h4>
+                <div className="space-y-2">
+                  {typeDocs.map(doc => (
+                    <div key={doc.id} className="bg-white border border-gray-100 rounded-xl p-3 flex items-center gap-3 shadow-sm">
+                      <div className="text-2xl">📄</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm truncate">{doc.filename || doc.type}</div>
+                        {doc.notes && <div className="text-xs text-gray-500">{doc.notes}</div>}
+                        <div className="text-xs text-gray-400 mt-0.5">Added by {doc.uploaded_by} · {timeAgo(doc.uploaded_at)}</div>
+                      </div>
+                      <div className="flex gap-2">
+                        <a href={doc.drive_url} target="_blank" rel="noreferrer"
+                           className="text-green-600 hover:text-green-700 text-sm font-medium">Open →</a>
+                        <button onClick={() => deleteDoc(doc.id)} className="text-red-400 hover:text-red-600 text-xs">Remove</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── EMAIL MODAL ──────────────────────────────────────────────────────────────
+function EmailModal({ student, onClose }) {
+  const templates = [
+    { name: 'Enrollment Form Confirmation', subject: `Success Virtual Learning Centers - Enrollment Confirmation`, body: `Hi ${student.contact_first_name || 'there'},\n\nThank you for your interest in Success Virtual Learning Centers! We received your enrollment inquiry and are excited to connect with you.\n\nWe will be reaching out shortly to schedule your appointment.\n\nIf you have any questions, please don't hesitate to reach out.\n\nWarm regards,\nSuccess Virtual Learning Centers` },
+    { name: 'Appointment Reminder', subject: `Reminder: Your Appointment with Success Virtual Learning Centers`, body: `Hi ${student.contact_first_name || 'there'},\n\nThis is a friendly reminder about your upcoming enrollment appointment with Success Virtual Learning Centers.\n\nPlease make sure to have any relevant documents ready.\n\nLooking forward to speaking with you!\n\nWarm regards,\nSuccess Virtual Learning Centers` },
+    { name: 'Documents Needed', subject: `Documents Needed - Success Virtual Learning Centers`, body: `Hi ${student.contact_first_name || 'there'},\n\nThank you for meeting with us! To move forward with enrollment, we need the following documents:\n\n• State-issued photo ID\n• Most recent transcript\n• IEP or 504 Plan (if applicable)\n\nPlease send these to us at your earliest convenience.\n\nWarm regards,\nSuccess Virtual Learning Centers` },
+  ];
+  const [selected, setSelected] = useState(templates[0]);
+
+  function sendEmail() {
+    const email = student.contact_email;
+    if (!email) { alert('No email address on file for this contact.'); return; }
+    const url = `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(email)}&su=${encodeURIComponent(selected.subject)}&body=${encodeURIComponent(selected.body)}`;
+    window.open(url, '_blank');
+    onClose();
+  }
+
+  return (
+    <Modal title="Send Email" onClose={onClose}>
+      <div className="mb-3">
+        <label className="block text-xs font-semibold text-gray-500 mb-1">Choose a Template</label>
+        <select
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+          onChange={e => setSelected(templates[parseInt(e.target.value)])}
+        >
+          {templates.map((t, i) => <option key={i} value={i}>{t.name}</option>)}
+        </select>
+      </div>
+      <div className="mb-3">
+        <label className="block text-xs font-semibold text-gray-500 mb-1">Subject</label>
+        <div className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50">{selected.subject}</div>
+      </div>
+      <div className="mb-4">
+        <label className="block text-xs font-semibold text-gray-500 mb-1">Preview</label>
+        <div className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 whitespace-pre-wrap text-gray-600 max-h-48 overflow-y-auto">{selected.body}</div>
+      </div>
+      {!student.contact_email && (
+        <p className="text-orange-500 text-xs mb-3">⚠ No email address on file. Add one in the Details tab first.</p>
+      )}
+      <div className="flex gap-2">
+        <button onClick={sendEmail} className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition">
+          Open in Gmail →
+        </button>
+        <button onClick={onClose} className="text-gray-500 text-sm px-3 hover:text-gray-700">Cancel</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── STUDENT PROFILE PAGE ─────────────────────────────────────────────────────
+function StudentProfilePage({ studentId, user, onBack }) {
+  const [student, setStudent] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('overview');
+  const [showEmail, setShowEmail] = useState(false);
+  const [showStatusPicker, setShowStatusPicker] = useState(false);
+
+  useEffect(() => {
+    const unsub = db.collection('students').doc(studentId)
+      .onSnapshot(snap => {
+        if (snap.exists) setStudent({ id: snap.id, ...snap.data() });
+        setLoading(false);
+      });
+    return () => unsub();
+  }, [studentId]);
+
+  async function updateStatus(newStatus) {
+    await db.collection('students').doc(studentId).update({
+      lead_status: newStatus,
+      updated_at: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    // Log to activity
+    await db.collection('students').doc(studentId).collection('activities').add({
+      type: 'note',
+      content: `Status changed to: ${newStatus}`,
+      created_by: user.displayName || user.email,
+      created_at: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    setShowStatusPicker(false);
+  }
+
+  if (loading) return <div className="flex items-center justify-center h-64 text-gray-400">Loading...</div>;
+  if (!student) return <div className="flex items-center justify-center h-64 text-gray-400">Student not found.</div>;
+
+  const tabs = [
+    { key: 'overview', label: 'Activity' },
+    { key: 'details', label: 'Details' },
+    { key: 'documents', label: 'Documents' },
+  ];
+
+  return (
+    <div className="fade-in">
+      {showEmail && <EmailModal student={student} onClose={() => setShowEmail(false)} />}
+
+      {/* Profile header */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="px-6 py-4">
+          <button onClick={onBack} className="text-sm text-gray-500 hover:text-gray-700 mb-3 flex items-center gap-1">
+            ← Back to Leads
+          </button>
+          <div className="flex flex-wrap items-start gap-4">
+            <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center text-xl font-bold text-green-700">
+              {(student.student_first_name||'?')[0]}{(student.student_last_name||'')[0]}
+            </div>
+            <div className="flex-1">
+              <h1 className="text-xl font-bold text-gray-900">
+                {student.student_first_name} {student.student_last_name}
+              </h1>
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <div className="relative">
+                  <button onClick={() => setShowStatusPicker(!showStatusPicker)} className="hover:opacity-80">
+                    <StatusBadge status={student.lead_status} />
+                  </button>
+                  {showStatusPicker && (
+                    <div className="absolute top-7 left-0 bg-white border border-gray-200 rounded-xl shadow-lg z-20 py-1 w-64">
+                      {LEAD_STATUSES.map(s => (
+                        <button key={s} onClick={() => updateStatus(s)}
+                          className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${student.lead_status === s ? 'font-semibold text-green-700' : ''}`}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {student.learning_center && <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{student.learning_center}</span>}
+                {student.contact_phone && <span className="text-xs text-gray-500">📞 {student.contact_phone}</span>}
+              </div>
+            </div>
+            <div className="flex gap-2 ml-auto">
+              <button onClick={() => setShowEmail(true)}
+                className="flex items-center gap-1 border border-gray-200 rounded-lg px-3 py-2 text-sm hover:bg-gray-50 transition">
+                📧 Email
+              </button>
+              {student.contact_phone && (
+                <a href={`tel:${student.contact_phone}`}
+                  className="flex items-center gap-1 border border-gray-200 rounded-lg px-3 py-2 text-sm hover:bg-gray-50 transition">
+                  📞 Call
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="px-6 flex gap-6">
+          {tabs.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`pb-3 text-sm font-medium transition border-b-2 ${tab === t.key ? 'border-green-600 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab content */}
+      <div className="p-6 max-w-3xl mx-auto">
+        {tab === 'overview' && <ActivityFeed studentId={studentId} user={user} />}
+        {tab === 'details' && <DetailsForm student={student} studentId={studentId} user={user} />}
+        {tab === 'documents' && <DocumentsTab studentId={studentId} user={user} />}
+      </div>
+    </div>
+  );
+}
+
+// ─── NEW LEAD MODAL ───────────────────────────────────────────────────────────
+function NewLeadModal({ user, onClose, onCreated }) {
+  const [form, setForm] = useState({
+    student_first_name: '', student_last_name: '', contact_first_name: '', contact_last_name: '',
+    contact_phone: '', contact_email: '', learning_center: '', lead_status: 'New Lead',
+    lead_source: 'Website', lead_owner: user.displayName || user.email, i_am_a: 'Parent/Guardian',
+  });
+  const [saving, setSaving] = useState(false);
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function create() {
+    if (!form.student_first_name && !form.contact_first_name) return;
+    setSaving(true);
+    try {
+      const ref = await db.collection('students').add({
+        ...form,
+        created_at: firebase.firestore.FieldValue.serverTimestamp(),
+        updated_at: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      // Log initial activity
+      await db.collection('students').doc(ref.id).collection('activities').add({
+        type: 'note',
+        content: `Lead created. Status: ${form.lead_status}.`,
+        created_by: user.displayName || user.email,
+        created_at: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      onCreated(ref.id);
+    } finally { setSaving(false); }
+  }
+
+  const inp = (k, placeholder='', type='text') => (
+    <input type={type} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+      placeholder={placeholder} value={form[k]||''} onChange={e => set(k, e.target.value)} />
+  );
+
+  return (
+    <Modal title="Add New Lead" onClose={onClose}>
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">I am a...</label>
+          <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" value={form.i_am_a} onChange={e => set('i_am_a', e.target.value)}>
+            <option value="Parent/Guardian">Parent / Guardian</option>
+            <option value="Adult Student">Adult Student (18+)</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="block text-xs font-semibold text-gray-500 mb-1">Student First Name</label>{inp('student_first_name', 'First')}</div>
+          <div><label className="block text-xs font-semibold text-gray-500 mb-1">Student Last Name</label>{inp('student_last_name', 'Last')}</div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="block text-xs font-semibold text-gray-500 mb-1">Contact First Name</label>{inp('contact_first_name', 'First')}</div>
+          <div><label className="block text-xs font-semibold text-gray-500 mb-1">Contact Last Name</label>{inp('contact_last_name', 'Last')}</div>
+        </div>
+        <div><label className="block text-xs font-semibold text-gray-500 mb-1">Phone</label>{inp('contact_phone', '(555) 555-5555', 'tel')}</div>
+        <div><label className="block text-xs font-semibold text-gray-500 mb-1">Email</label>{inp('contact_email', 'email@example.com', 'email')}</div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Learning Center</label>
+            <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" value={form.learning_center} onChange={e => set('learning_center', e.target.value)}>
+              <option value="">None Selected</option>
+              {LEARNING_CENTERS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Lead Status</label>
+            <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" value={form.lead_status} onChange={e => set('lead_status', e.target.value)}>
+              {LEAD_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+        <div><label className="block text-xs font-semibold text-gray-500 mb-1">Lead Source</label>{inp('lead_source', 'Website, Referral, etc.')}</div>
+        <div><label className="block text-xs font-semibold text-gray-500 mb-1">Assigned To</label>{inp('lead_owner', 'Your name')}</div>
+      </div>
+      <div className="flex gap-2 mt-5">
+        <button onClick={create} disabled={saving || (!form.student_first_name && !form.contact_first_name)}
+          className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition">
+          {saving ? 'Creating...' : 'Create Lead'}
+        </button>
+        <button onClick={onClose} className="text-gray-500 text-sm px-3 hover:text-gray-700">Cancel</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── NAVBAR ───────────────────────────────────────────────────────────────────
+function Navbar({ user, onHome }) {
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  return (
+    <nav className="bg-navy-900 text-white px-6 py-3 flex items-center gap-4 shadow-md" style={{ backgroundColor: '#1e3a5f' }}>
+      <button onClick={onHome} className="flex items-center gap-2 hover:opacity-80 transition">
+        <span className="text-2xl">🎓</span>
+        <span className="font-bold text-lg tracking-tight">Success CRM</span>
+      </button>
+      <div className="ml-auto relative">
+        <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 hover:opacity-80 transition">
+          {user.photoURL ? (
+            <img src={user.photoURL} alt="" className="w-8 h-8 rounded-full" />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center font-bold text-sm">
+              {(user.displayName || user.email || '?')[0].toUpperCase()}
+            </div>
+          )}
+          <span className="text-sm hidden sm:block">{user.displayName || user.email}</span>
+        </button>
+        {showUserMenu && (
+          <div className="absolute right-0 top-10 bg-white text-gray-700 border border-gray-200 rounded-xl shadow-lg py-1 w-44 z-30">
+            <button onClick={() => auth.signOut()} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50">Sign Out</button>
+          </div>
+        )}
+      </div>
+    </nav>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+function MainApp({ user }) {
+  const [page, setPage] = useState('list'); // 'list' | 'student'
+  const [studentId, setStudentId] = useState(null);
+  const [showNewLead, setShowNewLead] = useState(false);
+
+  function openStudent(id) { setStudentId(id); setPage('student'); }
+  function goHome() { setPage('list'); setStudentId(null); }
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <Navbar user={user} onHome={goHome} />
+      {showNewLead && (
+        <NewLeadModal
+          user={user}
+          onClose={() => setShowNewLead(false)}
+          onCreated={id => { setShowNewLead(false); openStudent(id); }}
+        />
+      )}
+      <div className="flex-1">
+        {page === 'list' && (
+          <LeadsListPage
+            user={user}
+            onSelect={openStudent}
+            onAddNew={() => setShowNewLead(true)}
+          />
+        )}
+        {page === 'student' && studentId && (
+          <StudentProfilePage
+            studentId={studentId}
+            user={user}
+            onBack={goHome}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── ROOT ─────────────────────────────────────────────────────────────────────
+function Root() {
+  const [firebaseReady, setFirebaseReady] = useState(false);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    // Try to load saved config
+    const saved = localStorage.getItem('success_crm_fb_config');
+    if (saved) {
+      try {
+        const config = JSON.parse(saved);
+        const ok = initFirebase(config);
+        if (ok) {
+          setFirebaseReady(true);
+          const unsub = auth.onAuthStateChanged(u => { setUser(u); setAuthLoading(false); });
+          return () => unsub();
+        }
+      } catch(e) { /* bad config */ }
+    }
+    setAuthLoading(false);
+  }, []);
+
+  function onSetupDone() {
+    setFirebaseReady(true);
+    setAuthLoading(true);
+    const unsub = auth.onAuthStateChanged(u => { setUser(u); setAuthLoading(false); });
+  }
+
+  if (!firebaseReady) return <SetupPage onDone={onSetupDone} />;
+  if (authLoading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading...</div>;
+  if (!user) return <LoginPage />;
+  return <MainApp user={user} />;
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<Root />);
+</script>
+</body>
+</html>
