@@ -1092,6 +1092,29 @@ function ActivityFeed({ studentId, user }) {
   );
 }
 
+// ─── DETAILS FORM HELPERS (module-level so React never unmounts inputs on re-render)
+const FIELD_CLS = "w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-white";
+
+function FormSection({ title, children, cols=3 }) {
+  const gridCls = cols===2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3';
+  return (
+    <div className="mb-4 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-100" style={{background:'#f0f4f7'}}>
+        <h3 className="text-xs font-bold uppercase tracking-widest" style={{color:'#3b4f5f'}}>{title}</h3>
+      </div>
+      <div className={`p-5 grid ${gridCls} gap-4`}>{children}</div>
+    </div>
+  );
+}
+function FormField({ label, span, children }) {
+  return (
+    <div className={span ? 'md:col-span-2 lg:col-span-3' : ''}>
+      <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
+      {children}
+    </div>
+  );
+}
+
 // ─── DETAILS FORM ────────────────────────────────────────────────────────────
 function DetailsForm({ student, studentId, user, adminCenters=[] }) {
   const [form, setForm] = useState({...student});
@@ -1099,15 +1122,13 @@ function DetailsForm({ student, studentId, user, adminCenters=[] }) {
   const [saved, setSaved] = useState(false);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
 
-  // Auto-fill center info when learning_center changes
   function setLearningCenter(centerName) {
-    const updates = { learning_center: centerName };
     const info = adminCenters.find(c=>c.name===centerName);
-    if(info) {
-      if(info.address) updates.center_address = info.address;
-      if(info.phone)   updates.center_phone   = info.phone;
-      if(info.email)   updates.center_email   = info.email;
-    }
+    const updates = { learning_center: centerName,
+      ...(info?.address ? {center_address:info.address} : {}),
+      ...(info?.phone   ? {center_phone:info.phone}     : {}),
+      ...(info?.email   ? {center_email:info.email}     : {}),
+    };
     setForm(f=>({...f,...updates}));
   }
 
@@ -1123,104 +1144,97 @@ function DetailsForm({ student, studentId, user, adminCenters=[] }) {
     } finally { setSaving(false); }
   }
 
-  const inputCls = "w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-white";
-
-  const Sec = ({title, children}) => (
-    <div className="mb-4 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-5 py-3 border-b border-gray-100" style={{background:'#f8fafc'}}>
-        <h3 className="text-xs font-bold uppercase tracking-widest" style={{color:'#3b4f5f'}}>{title}</h3>
-      </div>
-      <div className="p-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{children}</div>
-    </div>
-  );
-  const F = ({label, span, children}) => (
-    <div className={span ? 'md:col-span-2 lg:col-span-3' : ''}>
-      <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-      {children}
-    </div>
-  );
-  const Inp = ({k, type='text', ...p}) => (
-    <input type={type} {...p} className={inputCls}
-      value={form[k]||''} onChange={e=>set(k,e.target.value)} />
-  );
-  const Sel = ({k, options}) => (
-    <select className={inputCls} value={form[k]||''} onChange={e=>set(k,e.target.value)}>
-      <option value="">None Selected</option>
-      {options.map(o=><option key={o} value={o}>{o}</option>)}
-    </select>
-  );
-
   return (
     <div>
-      <Sec title="Student Information">
-        <F label="First Name"><Inp k="student_first_name" /></F>
-        <F label="Last Name"><Inp k="student_last_name" /></F>
-        <F label="Date of Birth">
-          <input type="date" className={inputCls}
-            value={form.student_dob||''}
-            onChange={e=>{ set('student_dob',e.target.value); set('student_age',calcAge(e.target.value)); }} />
-        </F>
-        <F label="Age">
-          <input className={`${inputCls} bg-gray-50 text-gray-500`}
+      <FormSection title="Student Information">
+        <FormField label="First Name">
+          <input className={FIELD_CLS} value={form.student_first_name||''} onChange={e=>set('student_first_name',e.target.value)} />
+        </FormField>
+        <FormField label="Last Name">
+          <input className={FIELD_CLS} value={form.student_last_name||''} onChange={e=>set('student_last_name',e.target.value)} />
+        </FormField>
+        <FormField label="Date of Birth">
+          <input type="date" className={FIELD_CLS} value={form.student_dob||''}
+            onChange={e=>setForm(f=>({...f, student_dob:e.target.value, student_age:calcAge(e.target.value)}))} />
+        </FormField>
+        <FormField label="Age">
+          <input className={`${FIELD_CLS} bg-gray-50 text-gray-500`}
             value={form.student_age||(form.student_dob?calcAge(form.student_dob):'')} readOnly />
-        </F>
-        <F label="Learning Center">
-          <select className={inputCls} value={form.learning_center||''} onChange={e=>setLearningCenter(e.target.value)}>
+        </FormField>
+        <FormField label="Learning Center">
+          <select className={FIELD_CLS} value={form.learning_center||''} onChange={e=>setLearningCenter(e.target.value)}>
             <option value="">None Selected</option>
-            {LEARNING_CENTERS.map(o=><option key={o} value={o}>{o}</option>)}
+            {LEARNING_CENTERS.map(o=><option key={o}>{o}</option>)}
           </select>
-        </F>
-        <F label="Last School Attended"><Inp k="last_school_attended" /></F>
-        <F label="IEP / 504 Status">
-          <select className={inputCls} value={form.iep_504||''} onChange={e=>set('iep_504',e.target.value)}>
+        </FormField>
+        <FormField label="Last School Attended">
+          <input className={FIELD_CLS} value={form.last_school_attended||''} onChange={e=>set('last_school_attended',e.target.value)} />
+        </FormField>
+        <FormField label="IEP / 504 Status">
+          <select className={FIELD_CLS} value={form.iep_504||''} onChange={e=>set('iep_504',e.target.value)}>
             <option value="">None Selected</option>
             <option>IEP</option><option>504 Plan</option><option>Neither</option>
           </select>
-        </F>
-        <F label="Expelled from Last School?">
-          <select className={inputCls}
+        </FormField>
+        <FormField label="Expelled from Last School?">
+          <select className={FIELD_CLS}
             value={form.expelled===true?'Yes':form.expelled===false?'No':''}
             onChange={e=>set('expelled',e.target.value==='Yes'?true:e.target.value==='No'?false:'')}>
             <option value="">None Selected</option><option>Yes</option><option>No</option>
           </select>
-        </F>
-        <F label="Preferred Language">
-          <select className={inputCls} value={form.preferred_language||'English'} onChange={e=>set('preferred_language',e.target.value)}>
+        </FormField>
+        <FormField label="Preferred Language">
+          <select className={FIELD_CLS} value={form.preferred_language||'English'} onChange={e=>set('preferred_language',e.target.value)}>
             <option>English</option><option>Spanish</option><option>Arabic</option><option>Other</option>
           </select>
-        </F>
-      </Sec>
+        </FormField>
+      </FormSection>
 
-      <Sec title="Student Contact">
-        <F label="Student Phone">
-          <input type="text" inputMode="tel" className={inputCls}
-            value={form.student_phone||''} onChange={e=>set('student_phone',e.target.value)} placeholder="(555) 555-5555" />
-        </F>
-        <F label="Student Email"><Inp k="student_email" type="email" /></F>
-      </Sec>
+      <FormSection title="Student Contact" cols={2}>
+        <FormField label="Student Phone">
+          <input type="text" inputMode="tel" className={FIELD_CLS} placeholder="(555) 555-5555"
+            value={form.student_phone||''} onChange={e=>set('student_phone',e.target.value)} />
+        </FormField>
+        <FormField label="Student Email">
+          <input type="email" className={FIELD_CLS} value={form.student_email||''} onChange={e=>set('student_email',e.target.value)} />
+        </FormField>
+      </FormSection>
 
-      <Sec title="Parent / Guardian Contact">
-        <F label="First Name"><Inp k="guardian_first_name" /></F>
-        <F label="Last Name"><Inp k="guardian_last_name" /></F>
-        <F label="Phone">
-          <input type="text" inputMode="tel" className={inputCls}
-            value={form.guardian_phone||''} onChange={e=>set('guardian_phone',e.target.value)} placeholder="(555) 555-5555" />
-        </F>
-        <F label="Email"><Inp k="guardian_email" type="email" /></F>
-      </Sec>
+      <FormSection title="Parent / Guardian Contact">
+        <FormField label="First Name">
+          <input className={FIELD_CLS} value={form.guardian_first_name||''} onChange={e=>set('guardian_first_name',e.target.value)} />
+        </FormField>
+        <FormField label="Last Name">
+          <input className={FIELD_CLS} value={form.guardian_last_name||''} onChange={e=>set('guardian_last_name',e.target.value)} />
+        </FormField>
+        <FormField label="Phone">
+          <input type="text" inputMode="tel" className={FIELD_CLS} placeholder="(555) 555-5555"
+            value={form.guardian_phone||''} onChange={e=>set('guardian_phone',e.target.value)} />
+        </FormField>
+        <FormField label="Email">
+          <input type="email" className={FIELD_CLS} value={form.guardian_email||''} onChange={e=>set('guardian_email',e.target.value)} />
+        </FormField>
+      </FormSection>
 
-      <Sec title="Enrollment Appointment">
-        <F label="Appointment Date / Time"><Inp k="enrollment_appointment_time" type="datetime-local" /></F>
-        <F label="Appointment Result"><Sel k="enrollment_appointment_result" options={APPOINTMENT_RESULTS} /></F>
-        <F label="Center Phone">
-          <input type="text" inputMode="tel" className={inputCls}
-            value={form.center_phone||''} onChange={e=>set('center_phone',e.target.value)}
-            placeholder="Auto-filled from center selection" />
-        </F>
-        <F label="Center Address" span>
-          <Inp k="center_address" placeholder="Auto-filled when center is selected above" />
-        </F>
-      </Sec>
+      <FormSection title="Enrollment Appointment">
+        <FormField label="Appointment Date / Time">
+          <input type="datetime-local" className={FIELD_CLS} value={form.enrollment_appointment_time||''} onChange={e=>set('enrollment_appointment_time',e.target.value)} />
+        </FormField>
+        <FormField label="Appointment Result">
+          <select className={FIELD_CLS} value={form.enrollment_appointment_result||''} onChange={e=>set('enrollment_appointment_result',e.target.value)}>
+            <option value="">None Selected</option>
+            {APPOINTMENT_RESULTS.map(o=><option key={o}>{o}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Center Phone">
+          <input type="text" inputMode="tel" className={FIELD_CLS} placeholder="Auto-filled from center"
+            value={form.center_phone||''} onChange={e=>set('center_phone',e.target.value)} />
+        </FormField>
+        <FormField label="Center Address" span>
+          <input className={FIELD_CLS} placeholder="Auto-filled when center is selected above"
+            value={form.center_address||''} onChange={e=>set('center_address',e.target.value)} />
+        </FormField>
+      </FormSection>
 
       <div className="flex items-center gap-3 pt-2 pb-8">
         <button onClick={save} disabled={saving}
@@ -1388,12 +1402,23 @@ function EmailModal({ student, onClose }) {
   );
 }
 
+// Saves on blur, not every keystroke — avoids Firestore re-render loop in header
+function AssignedInput({ studentId, value, onSave }) {
+  const [local, setLocal] = useState(value);
+  useEffect(()=>setLocal(value),[value]);
+  return (
+    <input type="text" value={local} placeholder="Unassigned"
+      onChange={e=>setLocal(e.target.value)}
+      onBlur={()=>{ if(local!==value) onSave(local); }}
+      className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-400 text-gray-700 w-28 bg-white" />
+  );
+}
+
 // ─── STUDENT PROFILE ─────────────────────────────────────────────────────────
 function StudentProfile({ studentId, user, onBack }) {
   const [student, setStudent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('activity');
-  const [showEmail, setShowEmail] = useState(false);
   const [showStatusDrop, setShowStatusDrop] = useState(false);
   const [showStageDrop, setShowStageDrop] = useState(false);
   const [showCenterDrop, setShowCenterDrop] = useState(false);
@@ -1440,8 +1465,6 @@ function StudentProfile({ studentId, user, onBack }) {
 
   return (
     <div className="fade-in flex flex-col h-full">
-      {showEmail && <EmailModal student={student} onClose={()=>setShowEmail(false)} />}
-
       {/* Header */}
       <div className="bg-white border-b border-gray-100 shadow-sm">
         <div className="px-6 pt-4 pb-0">
@@ -1489,28 +1512,11 @@ function StudentProfile({ studentId, user, onBack }) {
                 </div>
                 {contactPhone && <span className="text-xs text-gray-400 font-medium">📞 {contactPhone}</span>}
               </div>
-              {/* Lead source + Assigned to — compact row */}
-              <div className="flex flex-wrap items-center gap-3 mt-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-gray-400 font-medium whitespace-nowrap">Source:</span>
-                  <select value={student.lead_source||''} onChange={e=>updateField({lead_source:e.target.value},`Lead source set to: ${e.target.value}`)}
-                    className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-400 text-gray-700 bg-white">
-                    <option value="">Not set</option>
-                    {LEAD_SOURCES.map(s=><option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-gray-400 font-medium whitespace-nowrap">Assigned to:</span>
-                  <input type="text" value={student.lead_owner||''} placeholder="Unassigned"
-                    onChange={e=>updateField({lead_owner:e.target.value})}
-                    className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-400 text-gray-700 w-32 bg-white" />
-                </div>
-              </div>
             </div>
 
-            {/* Right: Stage + actions */}
-            <div className="flex flex-col items-end gap-2 ml-auto">
-              {/* Stage dropdown top-right */}
+            {/* Right: Stage + Source + Assigned To + Call */}
+            <div className="flex flex-col items-end gap-2 ml-auto flex-shrink-0">
+              {/* Stage dropdown */}
               <div className="relative">
                 <button onClick={()=>{setShowStageDrop(!showStageDrop);setShowStatusDrop(false);setShowCenterDrop(false);}}
                   className={`status-badge ${stageInfo.color} cursor-pointer hover:opacity-80 transition pr-3`}>
@@ -1525,25 +1531,33 @@ function StudentProfile({ studentId, user, onBack }) {
                   </div>
                 )}
               </div>
-              {/* Action buttons */}
-              <div className="flex gap-2">
-                <button onClick={()=>setShowEmail(true)}
-                  className="flex items-center gap-1.5 border border-gray-200 rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-gray-50 transition">
-                  📧 Email
-                </button>
-                {contactPhone && (
-                  <a href={`tel:${contactPhone}`}
-                    className="flex items-center gap-1.5 border border-gray-200 rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-gray-50 transition">
-                    📞 Call
-                  </a>
-                )}
+              {/* Lead Source */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400 font-medium whitespace-nowrap">Source:</span>
+                <select value={student.lead_source||''} onChange={e=>updateField({lead_source:e.target.value},`Lead source set to: ${e.target.value}`)}
+                  className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-400 text-gray-700 bg-white">
+                  <option value="">Not set</option>
+                  {LEAD_SOURCES.map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
+              {/* Assigned To */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400 font-medium whitespace-nowrap">Assigned:</span>
+                <AssignedInput studentId={studentId} value={student.lead_owner||''} onSave={v=>updateField({lead_owner:v})} />
+              </div>
+              {/* Call button */}
+              {contactPhone && (
+                <a href={`tel:${contactPhone}`}
+                  className="flex items-center gap-1.5 border border-gray-200 rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-gray-50 transition mt-1">
+                  📞 Call
+                </a>
+              )}
             </div>
           </div>
 
           {/* Tabs */}
           <div className="flex gap-1">
-            {[['activity','Activity'],['details','Details'],['documents','Documents']].map(([k,l])=>(
+            {[['activity','Overview'],['details','Details'],['documents','Documents']].map(([k,l])=>(
               <button key={k} onClick={()=>setTab(k)}
                 className={`px-4 py-2.5 text-sm font-semibold transition border-b-2 ${tab===k?'border-green-700 text-green-700':'border-transparent text-gray-400 hover:text-gray-600'}`}
                 style={tab===k?{borderColor:'#5ba300',color:'#5ba300'}:{}}>
@@ -1560,6 +1574,12 @@ function StudentProfile({ studentId, user, onBack }) {
           <div className="flex gap-5 items-start">
             <QuickInfoSidebar student={student} />
             <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+                <div>
+                  <h2 className="font-bold text-gray-800 text-base">Activity Log</h2>
+                  <p className="text-xs text-gray-400 mt-0.5">All calls, texts, notes, and emails for this student</p>
+                </div>
+              </div>
               <ActivityFeed studentId={studentId} user={user} />
             </div>
           </div>
