@@ -536,14 +536,6 @@ function DetailsForm({ student, studentId, user }) {
             <option value="Other">Other</option>
           </select>
         </Field>
-        <Field label="I am a...">
-          <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" value={form.i_am_a||''} onChange={e => set('i_am_a', e.target.value)}>
-            <option value="">None Selected</option>
-            <option value="Parent/Guardian">Parent / Guardian</option>
-            <option value="Adult Student">Adult Student (18+)</option>
-            <option value="Other">Other</option>
-          </select>
-        </Field>
       </Section>
 
       <Section title="Contact Information">
@@ -907,7 +899,7 @@ function NewLeadModal({ user, onClose, onCreated }) {
   const [form, setForm] = useState({
     student_first_name: '', student_last_name: '', contact_first_name: '', contact_last_name: '',
     contact_phone: '', contact_email: '', learning_center: '', lead_status: 'New Lead',
-    lead_source: 'Website', lead_owner: user.displayName || user.email, i_am_a: 'Parent/Guardian',
+    lead_source: 'Website', lead_owner: user.displayName || user.email,
   });
   const [saving, setSaving] = useState(false);
 
@@ -941,14 +933,6 @@ function NewLeadModal({ user, onClose, onCreated }) {
   return (
     <Modal title="Add New Lead" onClose={onClose}>
       <div className="space-y-3">
-        <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1">I am a...</label>
-          <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" value={form.i_am_a} onChange={e => set('i_am_a', e.target.value)}>
-            <option value="Parent/Guardian">Parent / Guardian</option>
-            <option value="Adult Student">Adult Student (18+)</option>
-            <option value="Other">Other</option>
-          </select>
-        </div>
         <div className="grid grid-cols-2 gap-3">
           <div><label className="block text-xs font-semibold text-gray-500 mb-1">Student First Name</label>{inp('student_first_name', 'First')}</div>
           <div><label className="block text-xs font-semibold text-gray-500 mb-1">Student Last Name</label>{inp('student_last_name', 'Last')}</div>
@@ -988,15 +972,186 @@ function NewLeadModal({ user, onClose, onCreated }) {
   );
 }
 
+// ─── DASHBOARD PAGE ──────────────────────────────────────────────────────────
+function DashboardPage({ user, onSelectStudent }) {
+  const [leads, setLeads] = useState([]);
+  const [activities, setActivities] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsub = db.collection('students')
+      .orderBy('created_at', 'desc')
+      .onSnapshot(snap => {
+        setLeads(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      });
+    return () => unsub();
+  }, []);
+
+  // Metrics
+  const total = leads.length;
+  const now = new Date();
+  const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+  const newThisWeek = leads.filter(l => l.created_at?.toDate?.() > weekAgo).length;
+  const enrolled = leads.filter(l => l.lead_status === 'Appointment Completed - Enrolled').length;
+  const apptScheduled = leads.filter(l => l.lead_status === 'Appointment Scheduled').length;
+  const sentToSS = leads.filter(l => l.lead_status === 'Sent to Student Services').length;
+  const unqualified = leads.filter(l => l.lead_status === 'Unqualified' || l.lead_status === 'Appointment Completed - Not Qualified').length;
+
+  // Status breakdown
+  const byStatus = LEAD_STATUSES.map(s => ({
+    status: s,
+    count: leads.filter(l => l.lead_status === s).length,
+  })).filter(x => x.count > 0).sort((a, b) => b.count - a.count);
+
+  // Center breakdown
+  const byCenter = LEARNING_CENTERS.map(c => ({
+    center: c,
+    count: leads.filter(l => l.learning_center === c).length,
+  })).filter(x => x.count > 0).sort((a, b) => b.count - a.count);
+
+  // Recent leads
+  const recentLeads = leads.slice(0, 8);
+
+  // Upcoming appointments (next 7 days)
+  const upcoming = leads.filter(l => {
+    if (!l.enrollment_appointment_time) return false;
+    const apptDate = new Date(l.enrollment_appointment_time);
+    return apptDate >= now && apptDate <= new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  }).sort((a, b) => new Date(a.enrollment_appointment_time) - new Date(b.enrollment_appointment_time));
+
+  const StatCard = ({ label, value, color, sub }) => (
+    <div className={`bg-white rounded-xl border border-gray-100 shadow-sm p-5`}>
+      <div className={`text-3xl font-bold ${color}`}>{value}</div>
+      <div className="text-sm font-semibold text-gray-700 mt-1">{label}</div>
+      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
+    </div>
+  );
+
+  if (loading) return <div className="flex items-center justify-center h-64 text-gray-400">Loading...</div>;
+
+  return (
+    <div className="p-6 fade-in max-w-6xl mx-auto">
+      <h1 className="text-xl font-bold text-gray-900 mb-5">Dashboard</h1>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <StatCard label="Total Leads" value={total} color="text-gray-800" />
+        <StatCard label="New This Week" value={newThisWeek} color="text-blue-600" />
+        <StatCard label="Appt Scheduled" value={apptScheduled} color="text-purple-600" />
+        <StatCard label="Enrolled" value={enrolled} color="text-green-600" />
+        <StatCard label="Sent to Student Services" value={sentToSS} color="text-teal-600" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        {/* Status breakdown */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 md:col-span-2">
+          <h2 className="font-bold text-gray-700 mb-4 text-sm uppercase tracking-wider">Leads by Status</h2>
+          {byStatus.length === 0 ? (
+            <p className="text-gray-400 text-sm">No leads yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {byStatus.map(({ status, count }) => {
+                const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                const color = STATUS_COLORS[status] || 'bg-gray-100 text-gray-600';
+                return (
+                  <div key={status} className="flex items-center gap-3">
+                    <div className="w-40 text-xs text-gray-600 truncate">{status}</div>
+                    <div className="flex-1 bg-gray-100 rounded-full h-2">
+                      <div className="bg-green-500 h-2 rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="text-sm font-semibold text-gray-700 w-6 text-right">{count}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Center breakdown */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+          <h2 className="font-bold text-gray-700 mb-4 text-sm uppercase tracking-wider">By Learning Center</h2>
+          {byCenter.length === 0 ? (
+            <p className="text-gray-400 text-sm">No data yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {byCenter.map(({ center, count }) => (
+                <div key={center} className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">{center}</span>
+                  <span className="text-sm font-bold text-gray-800 bg-gray-100 px-2 py-0.5 rounded-full">{count}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Upcoming appointments */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+          <h2 className="font-bold text-gray-700 mb-4 text-sm uppercase tracking-wider">Upcoming Appointments</h2>
+          {upcoming.length === 0 ? (
+            <p className="text-gray-400 text-sm">No appointments in the next 7 days.</p>
+          ) : (
+            <div className="space-y-3">
+              {upcoming.map(l => (
+                <div key={l.id} onClick={() => onSelectStudent(l.id)} className="cursor-pointer hover:bg-gray-50 rounded-lg p-2 -mx-2 transition">
+                  <div className="font-semibold text-sm text-gray-800">{l.student_first_name} {l.student_last_name}</div>
+                  <div className="text-xs text-gray-500">{new Date(l.enrollment_appointment_time).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}</div>
+                  {l.learning_center && <div className="text-xs text-green-600">{l.learning_center}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Recent leads */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 md:col-span-2">
+          <h2 className="font-bold text-gray-700 mb-4 text-sm uppercase tracking-wider">Recent Leads</h2>
+          {recentLeads.length === 0 ? (
+            <p className="text-gray-400 text-sm">No leads yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {recentLeads.map(l => (
+                <div key={l.id} onClick={() => onSelectStudent(l.id)}
+                  className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 rounded-lg p-2 -mx-2 transition">
+                  <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-xs font-bold text-green-700 flex-shrink-0">
+                    {(l.student_first_name||'?')[0]}{(l.student_last_name||'')[0]}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm text-gray-800">{l.student_first_name} {l.student_last_name}</div>
+                    <div className="text-xs text-gray-500">{l.contact_phone} {l.learning_center ? `· ${l.learning_center}` : ''}</div>
+                  </div>
+                  <StatusBadge status={l.lead_status} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── NAVBAR ───────────────────────────────────────────────────────────────────
-function Navbar({ user, onHome }) {
+function Navbar({ user, onHome, onDashboard, currentPage }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   return (
-    <nav className="bg-navy-900 text-white px-6 py-3 flex items-center gap-4 shadow-md" style={{ backgroundColor: '#1e3a5f' }}>
+    <nav className="bg-navy-900 text-white px-6 py-3 flex items-center gap-6 shadow-md" style={{ backgroundColor: '#1e3a5f' }}>
       <button onClick={onHome} className="flex items-center gap-2 hover:opacity-80 transition">
         <span className="text-2xl">🎓</span>
         <span className="font-bold text-lg tracking-tight">Success CRM</span>
       </button>
+      <div className="flex items-center gap-1">
+        <button onClick={onDashboard}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${currentPage === 'dashboard' ? 'bg-white/20' : 'hover:bg-white/10'}`}>
+          Dashboard
+        </button>
+        <button onClick={onHome}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${currentPage === 'list' ? 'bg-white/20' : 'hover:bg-white/10'}`}>
+          All Leads
+        </button>
+      </div>
       <div className="ml-auto relative">
         <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 hover:opacity-80 transition">
           {user.photoURL ? (
@@ -1020,16 +1175,17 @@ function Navbar({ user, onHome }) {
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 function MainApp({ user }) {
-  const [page, setPage] = useState('list'); // 'list' | 'student'
+  const [page, setPage] = useState('dashboard'); // 'dashboard' | 'list' | 'student'
   const [studentId, setStudentId] = useState(null);
   const [showNewLead, setShowNewLead] = useState(false);
 
   function openStudent(id) { setStudentId(id); setPage('student'); }
   function goHome() { setPage('list'); setStudentId(null); }
+  function goDashboard() { setPage('dashboard'); setStudentId(null); }
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Navbar user={user} onHome={goHome} />
+      <Navbar user={user} onHome={goHome} onDashboard={goDashboard} currentPage={page} />
       {showNewLead && (
         <NewLeadModal
           user={user}
@@ -1038,6 +1194,9 @@ function MainApp({ user }) {
         />
       )}
       <div className="flex-1">
+        {page === 'dashboard' && (
+          <DashboardPage user={user} onSelectStudent={openStudent} />
+        )}
         {page === 'list' && (
           <LeadsListPage
             user={user}
